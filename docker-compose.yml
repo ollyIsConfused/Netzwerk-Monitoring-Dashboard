@@ -37,10 +37,9 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-monitoring}:${POSTGRES_PASSWORD:-monitoring}@db:5432/${POSTGRES_DB:-monitoring}
+      BACKEND_URL: http://backend:8000
     depends_on:
-      db:
-        condition: service_healthy
+      - backend
 
   frontend:
     build:

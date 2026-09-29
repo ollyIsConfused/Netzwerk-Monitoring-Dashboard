@@ -1,0 +1,17 @@
+[Unit]
+Description=Netzwerk-Monitoring Collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/monitoring-collector
+EnvironmentFile=/etc/monitoring-collector.env
+ExecStart=/opt/monitoring-collector/venv/bin/python -m collector.main
+Restart=always
+RestartSec=5
+User=monitoring
+Environment=PYTHONPATH=/opt/monitoring-collector
+
+[Install]
+WantedBy=multi-user.target

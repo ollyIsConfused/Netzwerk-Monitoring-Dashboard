@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from shared.database import init_db
 
-from .routers import alerts, auth, devices, metrics, vlans, ws
+from .notifications import dispatch_alert_emails_loop
+from .routers import alerts, auth, collector, devices, metrics, vlans, ws
 
 app = FastAPI(title="Netzwerk-Monitoring-Dashboard API")
 
@@ -23,24 +24,27 @@ app.include_router(vlans.router)
 app.include_router(devices.router)
 app.include_router(metrics.router)
 app.include_router(alerts.router)
+app.include_router(collector.router)
 app.include_router(ws.router)
 
-_broadcast_task: asyncio.Task | None = None
+_background_tasks: list[asyncio.Task] = []
 
 
 @app.on_event("startup")
 def on_startup():
     init_db()
-    global _broadcast_task
-    _broadcast_task = asyncio.create_task(ws.broadcast_status_loop())
+    _background_tasks.append(asyncio.create_task(ws.broadcast_status_loop()))
+    _background_tasks.append(asyncio.create_task(dispatch_alert_emails_loop()))
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    if _broadcast_task is not None:
-        _broadcast_task.cancel()
+    for task in _background_tasks:
+        task.cancel()
+    for task in _background_tasks:
         with contextlib.suppress(asyncio.CancelledError):
-            await _broadcast_task
+            await task
+    _background_tasks.clear()
 
 
 @app.get("/health")
