@@ -7,7 +7,6 @@ WORKDIR /app
 COPY collector/requirements.txt collector/requirements.txt
 RUN pip install --no-cache-dir -r collector/requirements.txt
 
-COPY shared shared
 COPY collector collector
 
 ENV PYTHONPATH=/app
