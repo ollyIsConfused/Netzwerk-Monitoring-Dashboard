@@ -132,3 +132,29 @@ class AgentMetricPush(BaseModel):
 
     agent_token: str
     metrics: dict[str, float]
+
+
+class CollectorDeviceOut(BaseModel):
+    """Device polling config as handed to the collector service (no user-facing fields)."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    ip_address: str
+    device_type: DeviceType
+    snmp_enabled: bool
+    snmp_community: Optional[str] = None
+    snmp_version: str
+    snmp_port: int
+    snmp_interfaces: Optional[str] = None
+
+
+class CollectorMetricIn(BaseModel):
+    device_id: int
+    metric_name: str
+    value: float
+    timestamp: Optional[datetime] = None
+
+
+class CollectorMetricBatch(BaseModel):
+    samples: list[CollectorMetricIn]

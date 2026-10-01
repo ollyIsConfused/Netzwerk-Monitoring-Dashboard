@@ -1,7 +1,8 @@
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from shared.models import User, UserRole
 
-from .config import JWT_ALGORITHM, JWT_EXPIRE_MINUTES, JWT_SECRET
+from .config import COLLECTOR_API_TOKEN, JWT_ALGORITHM, JWT_EXPIRE_MINUTES, JWT_SECRET
 from .deps import get_db
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -62,3 +63,20 @@ def require_roles(*allowed_roles: UserRole):
         return user
 
     return dependency
+
+
+def require_collector_token(authorization: str = Header(default="")) -> None:
+    """Auth for the collector service: a single shared secret (no user account),
+    since the collector polls on behalf of the whole network, not one user."""
+    if not COLLECTOR_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="COLLECTOR_API_TOKEN ist auf dem Backend nicht konfiguriert",
+        )
+    expected = f"Bearer {COLLECTOR_API_TOKEN}"
+    if not secrets.compare_digest(authorization, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Ungültiges Collector-Token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

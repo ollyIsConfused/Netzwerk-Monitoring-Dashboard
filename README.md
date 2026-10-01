@@ -10,23 +10,39 @@ aus. Rollenbasierte Weboberfläche (Admin / Operator / Viewer).
 
 ```
 [Collector]  --Ping/SNMP-->  Geräte in allen VLANs
-     |                              (Agenten pushen direkt an /agent/push)
+     |
+     | HTTPS + Bearer-Token (COLLECTOR_API_TOKEN)
      v
-[PostgreSQL/TimescaleDB]  <-- Backend (FastAPI, REST + WebSocket)
-                                    |
-                                    v
-                          [Frontend (React), rollenbasiert]
+[Backend (FastAPI, REST + WebSocket)]  <-- Agenten pushen direkt an /agent/push
+     |
+     v
+[PostgreSQL]
+     |
+     v
+[Frontend (React), rollenbasiert]
 ```
 
-- **`shared/`** – gemeinsames Datenmodell (SQLAlchemy) und Schwellenwert-/Alarmlogik,
-  von Backend und Collector genutzt, damit beide Pfade konsistent Alarme auslösen.
+Der Collector hat **keinen** direkten Datenbankzugriff und keine Abhängigkeit
+von `shared/` – er ist ein reiner HTTP-Client und kann dadurch unabhängig vom
+Rest deployt werden (z. B. auf einem Router/Gateway, das ohnehin Zugriff auf
+alle VLANs hat), während Backend/DB/Frontend woanders laufen. Details und ein
+konkretes Beispiel (Collector auf einem Router-Pi am Trunk-Port, Rest auf
+einem bestehenden Webserver mit pm2) stehen in
+[`docs/deployment.md`](docs/deployment.md).
+
+- **`shared/`** – gemeinsames Datenmodell (SQLAlchemy), Schwellenwert-/Alarmlogik
+  und der SMTP-Notifier; wird nur vom Backend genutzt (Single Point of Truth für
+  Alarme, keine Duplikation zwischen mehreren Schreibpfaden).
 - **`backend/`** – FastAPI-API: Auth (JWT, Rollen), Geräte-/VLAN-Verwaltung,
-  Metrik-Abfrage, Alarme (inkl. Quittierung), WebSocket-Status-Push, Endpunkt für
-  eigene Agenten (`POST /agent/push`).
-- **`collector/`** – eigenständiger Dienst, pollt zyklisch alle aktiven Geräte
-  (ICMP-Ping für Erreichbarkeit/Latenz/Paketverlust, SNMP für Switch/Router-
-  Interface-Zähler → daraus abgeleitete Bandbreite), wertet Schwellenwerte aus
-  und verschickt Alarm-E-Mails per SMTP.
+  Metrik-Abfrage, Alarme (inkl. Quittierung), WebSocket-Status-Push, Endpunkte
+  für den Collector (`GET /collector/devices`, `POST /collector/metrics`,
+  Token-geschützt) und für eigene Agenten (`POST /agent/push`), sowie eine
+  Hintergrundschleife, die fällige Alarm-E-Mails verschickt.
+- **`collector/`** – eigenständiger, DB-loser Dienst, pollt zyklisch alle
+  aktiven Geräte (ICMP-Ping für Erreichbarkeit/Latenz/Paketverlust, SNMP für
+  Switch/Router-Interface-Zähler → daraus abgeleitete Bandbreite) und schickt
+  die Rohwerte per HTTPS ans Backend; Schwellenwertauswertung/Alarme passieren
+  zentral im Backend.
 - **`frontend/`** – React/Vite-Dashboard: VLAN-Übersicht mit Live-Status
   (WebSocket), Geräte-Detailseite mit Zeitreihen-Diagrammen, Alarmliste mit
   Quittierfunktion.
@@ -35,7 +51,8 @@ aus. Rollenbasierte Weboberfläche (Admin / Operator / Viewer).
 
 ```bash
 cp .env.example .env
-# .env anpassen: JWT_SECRET setzen, SMTP-Zugangsdaten für Alarm-Mails eintragen
+# .env anpassen: JWT_SECRET + COLLECTOR_API_TOKEN setzen (beliebige lange Zufallsstrings),
+# SMTP-Zugangsdaten für Alarm-Mails eintragen
 
 docker compose up --build -d
 
@@ -73,6 +90,10 @@ Geräte es unterstützen.
 
 ## Bekannte Einschränkungen (MVP)
 
+- `GET /collector/devices` liefert die SNMP-Community im Klartext an den
+  Collector aus – unproblematisch, solange die Verbindung per TLS (HTTPS)
+  läuft (siehe `docs/deployment.md`), aber **nicht** ohne TLS zwischen
+  getrennten Hosts einsetzen.
 - Der WebSocket-Status-Kanal (`/ws/status`) ist nicht durch das JWT geschützt
   (liefert nur aggregierte Status-Labels, keine sensiblen Werte) – für den
   Produktivbetrieb sollte er zusätzlich abgesichert werden (z. B. Token-Check
