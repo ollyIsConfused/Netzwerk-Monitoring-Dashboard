@@ -1,4 +1,9 @@
-"""Sends e-mail notifications for alert events via SMTP."""
+"""Sends e-mail notifications for alert events via SMTP.
+
+Lives in shared/ (not backend/ or collector/) because it has no database or
+web-framework dependency of its own - just stdlib smtplib - and is invoked by
+the backend's alert-dispatch background task.
+"""
 import logging
 import os
 import smtplib

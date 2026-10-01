@@ -1,6 +1,12 @@
 import axios from "axios";
 
-export const api = axios.create({ baseURL: "/api" });
+// Default "/api" relies on a reverse proxy in front of frontend+backend rewriting
+// that prefix (see docker-compose/nginx.conf). Set VITE_API_BASE_URL at build time
+// when frontend and backend are deployed on different hosts/ports without a
+// shared proxy path (e.g. frontend served via pm2, backend on its own port).
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
+
+export const api = axios.create({ baseURL: API_BASE_URL });
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");

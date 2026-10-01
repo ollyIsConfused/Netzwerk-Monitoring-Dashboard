@@ -31,8 +31,10 @@ export function DashboardPage() {
   useEffect(() => {
     // Hinweis: der WebSocket-Endpunkt liefert nur aggregierte Status-Werte (kein JWT-Schutz in
     // diesem MVP) - siehe README, Abschnitt "Bekannte Einschränkungen" für die Produktivhärtung.
+    // VITE_WS_BASE_URL analog zu VITE_API_BASE_URL für Deployments ohne gemeinsamen Reverse-Proxy.
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
+    const wsBase = import.meta.env.VITE_WS_BASE_URL || `${protocol}//${window.location.host}/ws`;
+    const socket = new WebSocket(`${wsBase}/status`);
 
     socket.onmessage = (event) => {
       try {
