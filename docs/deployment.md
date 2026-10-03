@@ -130,6 +130,8 @@ PYTHONPATH=.. .venv/bin/python -m app.seed
 
 ### 1.3 Frontend bauen
 
+Voraussetzung: Node.js 20.19+ oder 22.12+ (Mindestversion von Vite 8).
+
 Falls Frontend und Backend über den bestehenden Reverse-Proxy auf dem Pi unter
 demselben Pfad erreichbar gemacht werden (empfohlen, siehe Abschnitt 3),
 reicht ein normaler Build ohne weitere Konfiguration:
