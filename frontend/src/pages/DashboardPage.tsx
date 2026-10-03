@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { api, DeviceStatus, MetricStatus, Vlan } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 
