@@ -121,8 +121,11 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
 # Admin-Benutzer + Beispiel-VLANs anlegen
-cd /opt/monitoring
-PYTHONPATH=. backend/.venv/bin/python -m app.seed
+# (aus backend/ heraus, damit "app" gefunden wird; .env laden, damit DATABASE_URL
+# auf die NAS zeigt; PYTHONPATH=.. damit "shared/" gefunden wird)
+cd /opt/monitoring/backend
+set -a; source ../.env; set +a
+PYTHONPATH=.. .venv/bin/python -m app.seed
 ```
 
 ### 1.3 Frontend bauen
