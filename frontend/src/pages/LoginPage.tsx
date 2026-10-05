@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { apiErrorMessage } from "../api/client";
 import { useAuth } from "../api/AuthContext";
 import { Icon } from "../components/Icon";
@@ -68,6 +68,9 @@ export function LoginPage() {
         <button type="submit" className="btn btn-primary" disabled={busy}>
           {busy ? "Anmelden…" : "Anmelden"}
         </button>
+        <div className="login-links">
+          <Link to="/forgot-password">Passwort vergessen?</Link>
+        </div>
       </form>
     </div>
   );

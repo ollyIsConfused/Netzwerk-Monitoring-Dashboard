@@ -59,6 +59,33 @@ einem bestehenden Webserver mit pm2) stehen in
 
 Der letzte aktive Admin kann weder herabgestuft, gesperrt noch gelöscht werden.
 
+### Konten und Passwörter
+
+- **Erste Anmeldung:** Benutzer `admin`, Passwort `admin` (oder `SEED_ADMIN_PASSWORD`
+  aus der `.env`). Danach zeigt das Dashboard nur die Seite „Eigenes Passwort
+  festlegen“, erst dann geht es weiter. Das Backend erzwingt das auch selbst: Bis
+  zum eigenen Passwort beantwortet es nur `/auth/me` und `/auth/change-password`.
+- **Neue Benutzer** legt ein Admin unter *Verwaltung > Benutzer* an, am einfachsten
+  mit „Einmal-Passwort erzeugen und per E-Mail schicken“. Auch hier muss beim ersten
+  Anmelden ein eigenes Passwort festgelegt werden.
+- **Passwort vergessen:** Link auf der Anmeldeseite, dort Benutzername und E-Mail
+  eingeben. Passen beide zu einem aktiven Konto, bekommt der Admin eine Mail mit
+  Benutzername und E-Mail-Adresse. Die Mail geht an `ADMIN_NOTIFY_EMAIL`, sonst an
+  alle aktiven Admins. In der Benutzerverwaltung steht die Anfrage zusätzlich als
+  Hinweis. Der Admin klickt beim Benutzer auf das Schlüssel-Symbol, und das Dashboard
+  schickt ein Einmal-Passwort an die **hinterlegte** Adresse des Kontos. Klappt der
+  Versand nicht (kein SMTP), zeigt es das Einmal-Passwort einmalig an, damit der Admin
+  es selbst weitergeben kann.
+- **Schutz:** Die Antwort auf „Passwort vergessen“ ist immer gleich (man kann nicht
+  ausprobieren, welche Konten es gibt). Pro Konto geht höchstens alle 15 Minuten eine
+  Mail raus. Jede Passwortänderung meldet alle anderen Sitzungen dieses Kontos ab.
+- **Admin ausgesperrt?** Aus `backend/` heraus (mit geladener `.env`):
+  `PYTHONPATH=.. .venv/bin/python -m app.set_password admin`. Das Passwort wird
+  verdeckt abgefragt.
+- **E-Mail testen:** `PYTHONPATH=.. .venv/bin/python -m app.mailtest [adresse]`
+  (auf dem Server: `./deploy/webserver/install.sh --mailtest`). Für Gmail braucht
+  man ein App-Passwort, siehe Kommentar in `.env.example`.
+
 ## Setup (lokal mit Docker Compose)
 
 ```bash
@@ -72,7 +99,7 @@ docker compose up --build -d
 docker compose exec backend python -m app.seed
 ```
 
-- Frontend: http://localhost:5173 (Login mit `admin` / dem in `.env` gesetzten `SEED_ADMIN_PASSWORD`)
+- Frontend: http://localhost:5173 (erste Anmeldung `admin` / `admin`, danach eigenes Passwort festlegen)
 - Backend-API/Docs: http://localhost:8000/docs
 
 ### Alternative: Backend und Frontend direkt starten, nur die Datenbank in Docker
@@ -81,10 +108,7 @@ Praktisch zum Entwickeln, weil Code-Änderungen sofort neu geladen werden.
 Einmalig:
 
 ```bash
-cp .env.example .env
-# zusätzlich in .env: DATABASE_URL=postgresql+psycopg2://monitoring:<POSTGRES_PASSWORD>@localhost:5432/monitoring
 cd backend && python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
-cd frontend && npm install && cd ..
 ```
 
 Starten (Datenbank, Admin-Benutzer, Backend und Frontend in einem Terminal,
@@ -94,6 +118,12 @@ Strg+C beendet Backend und Frontend):
 ./dev.sh
 ```
 
+Beim ersten Start legt `dev.sh` die `.env` selbst an (Zufallswerte für Secrets und
+das Datenbank-Passwort) und baut die Verbindung zur Docker-Datenbank daraus.
+Meldet es `password authentication failed`, wurde der Datenbank-Container früher
+mit einem anderen Passwort angelegt. Dann lokale Testdaten verwerfen mit
+`docker compose down -v` und `./dev.sh` erneut starten.
+
 Der Seed legt den Admin nur beim ersten Mal an. Ein später in `.env`
 geändertes `SEED_ADMIN_PASSWORD` ändert das bestehende Passwort nicht.
 
@@ -101,10 +131,6 @@ Danach im Dashboard unter **Verwaltung** zuerst die VLANs, dann die Geräte
 anlegen (IP-Adresse, VLAN, für Switch/Router SNMP-Community und Interface-Indizes,
 für NAS/Webserver optional ein Agent-Token). Auf der Detailseite eines Geräts
 lassen sich Schwellenwerte anlegen, z. B. mit der Vorlage „Offline-Alarm“.
-
-Admin-Passwort vergessen? Aus `backend/` heraus (mit geladener `.env`):
-`PYTHONPATH=.. .venv/bin/python -m app.set_password admin` – fragt das neue
-Passwort verdeckt ab.
 
 ## Tests
 
@@ -115,8 +141,10 @@ PYTHONPATH=.. .venv/bin/pytest
 ```
 
 Die Tests laufen gegen eine temporäre SQLite-Datenbank (kein PostgreSQL nötig)
-und decken Anmeldung, Benutzerverwaltung, VLAN-/Geräte-/Schwellenwert-Verwaltung
-und den Alarm-Ablauf über den Collector-Endpunkt ab.
+und decken Anmeldung, Pflicht-Passwortwechsel, „Passwort vergessen“, Einmal-Passwörter,
+Benutzerverwaltung, VLAN-/Geräte-/Schwellenwert-Verwaltung, den Alarm-Ablauf über den
+Collector-Endpunkt und das automatische Ergänzen neuer Spalten in alten Datenbanken ab.
+E-Mails werden in den Tests abgefangen statt verschickt.
 
 ## Installation im Homelab
 
