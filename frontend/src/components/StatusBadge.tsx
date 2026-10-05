@@ -1,33 +1,44 @@
-import { MetricStatus } from "../api/client";
+import { AlertLevel, MetricStatus } from "../api/client";
+import { Icon, IconName } from "./Icon";
 
-const LABELS: Record<MetricStatus, string> = {
-  ok: "OK",
-  warning: "Warnung",
-  critical: "Kritisch",
-  unknown: "Unbekannt",
+// Statusfarben sind reserviert und stehen nie allein: immer Symbol + Text dazu
+const STATUS: Record<MetricStatus, { label: string; color: string; icon: IconName }> = {
+  ok: { label: "OK", color: "var(--status-good)", icon: "checkCircle" },
+  warning: { label: "Warnung", color: "var(--status-warning)", icon: "alert" },
+  critical: { label: "Kritisch", color: "var(--status-critical)", icon: "xCircle" },
+  unknown: { label: "Unbekannt", color: "var(--status-unknown)", icon: "help" },
 };
 
-const COLORS: Record<MetricStatus, string> = {
-  ok: "#1a7f37",
-  warning: "#b08800",
-  critical: "#cf222e",
-  unknown: "#6e7781",
+const LEVEL: Record<AlertLevel, { label: string; color: string; icon: IconName }> = {
+  warning: STATUS.warning,
+  critical: STATUS.critical,
+  recovered: { label: "Behoben", color: "var(--status-good)", icon: "checkCircle" },
 };
+
+function Badge({ label, color, icon }: { label: string; color: string; icon: IconName }) {
+  return (
+    <span className="badge">
+      <span style={{ color, display: "inline-flex" }}>
+        <Icon name={icon} size={14} />
+      </span>
+      {label}
+    </span>
+  );
+}
 
 export function StatusBadge({ status }: { status: MetricStatus }) {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 10px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 600,
-        color: "#fff",
-        backgroundColor: COLORS[status],
-      }}
-    >
-      {LABELS[status]}
-    </span>
+  return <Badge {...STATUS[status]} />;
+}
+
+export function AlertLevelBadge({ level }: { level: AlertLevel }) {
+  return <Badge {...LEVEL[level]} />;
+}
+
+export function ReachableBadge({ reachable }: { reachable: boolean | null }) {
+  if (reachable === null) return <Badge {...STATUS.unknown} label="Keine Daten" />;
+  return reachable ? (
+    <Badge label="Online" color="var(--status-good)" icon="checkCircle" />
+  ) : (
+    <Badge label="Offline" color="var(--status-critical)" icon="xCircle" />
   );
 }
