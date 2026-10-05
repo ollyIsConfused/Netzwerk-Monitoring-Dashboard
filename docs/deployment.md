@@ -10,18 +10,22 @@ Webserver läuft mit **pm2** (kein Docker). Am Netzwerk/an den VLANs muss
 dafür **nichts** verändert werden.
 
 ```
-Browser ──HTTPS──▶ Pi (bestehender Reverse-Proxy, TLS)
-                       │
-                       ├──▶ Webserver:5173  (Frontend, statischer Build)
-                       └──▶ Webserver:8000  (Backend-API + WebSocket)
+Browser (per VPN) ──HTTP──▶ Webserver:8080  nginx
+                                ├── /       → Frontend (statischer Build)
+                                ├── /api/   → Backend 127.0.0.1:8000 (pm2)
+                                └── /ws/    → Backend-WebSocket
 
-Router-Pi (Collector, systemd) ──HTTP/HTTPS + Bearer-Token──▶ Webserver:8000
+Router-Pi (Collector, systemd) ──HTTP + Bearer-Token──▶ Webserver:8080/api
 Collector ──ICMP/SNMP──▶ Geräte in allen VLANs (lokal vom Router aus, da
                           der Collector auf dem Router selbst läuft)
 
 Webserver (Backend) ──postgresql://<nas-ip>:5432──▶ NAS-Pi (Postgres,
                           Datenverzeichnis auf dem Festplatten-Array)
 ```
+
+Das Backend lauscht nur lokal auf dem Webserver; nach außen ist nur der eine
+nginx-Port sichtbar. Für Webserver und Router-Pi gibt es Installationsskripte,
+die beim ersten Mal einrichten und danach als Update dienen (Abschnitte 1 und 2).
 
 ## 0. NAS-Pi: Postgres
 
@@ -99,165 +103,126 @@ sudo -u postgres pg_dump monitoring | gzip > /mnt/storage/backups/monitoring-$(d
 
 ## 1. Webserver: Backend + Frontend
 
-### 1.1 Repo holen
+Voraussetzungen (einmalig): `git`, Python 3.10–3.12 mit `venv`, Node.js ≥ 18,
+`pm2` (`sudo npm install -g pm2`) und nginx.
+
+### 1.1 Repo holen und `.env` ausfüllen
 
 ```bash
-git clone <repo-url> /opt/monitoring
+sudo git clone https://github.com/ollyIsConfused/Netzwerk-Monitoring-Dashboard.git /opt/monitoring
+sudo chown -R "$USER" /opt/monitoring
 cd /opt/monitoring
-cp .env.example .env
+./deploy/webserver/install.sh
 ```
 
-`.env` ausfüllen:
-- `JWT_SECRET` und `COLLECTOR_API_TOKEN`: je ein langer Zufallsstring, z. B. `openssl rand -hex 32`
-- `DATABASE_URL=postgresql+psycopg2://monitoring:<passwort>@<nas-ip>:5432/monitoring` (Postgres läuft auf der NAS, siehe Abschnitt 0 – nicht `localhost`)
-- `BACKEND_URL` wird hier nicht gebraucht (nur relevant auf dem Pi)
-- SMTP-Zugangsdaten für Alarm-Mails
+Beim ersten Aufruf legt das Skript die `.env` an (Rechte `600`, `JWT_SECRET` und
+`COLLECTOR_API_TOKEN` schon zufällig gesetzt) und bricht mit einem Hinweis ab.
+Dann `nano .env` und eintragen:
 
-### 1.2 Backend
+- `DATABASE_URL=postgresql+psycopg2://monitoring:<passwort>@<nas-ip>:5432/monitoring`
+  (Postgres auf der NAS, siehe Abschnitt 0 – nicht `localhost`; Sonderzeichen im
+  Passwort wie `@ : / #` URL-kodiert)
+- `SEED_ADMIN_PASSWORD` – Passwort für den Benutzer `admin`. Bei Sonderzeichen in
+  einfache Anführungszeichen setzen: `SEED_ADMIN_PASSWORD='…'`
+- optional SMTP-Zugangsdaten für Alarm-Mails (bei Gmail ein App-Passwort)
+
+### 1.2 Installieren
 
 ```bash
-cd /opt/monitoring/backend
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+./deploy/webserver/install.sh
+```
 
-# Admin-Benutzer + Beispiel-VLANs anlegen
-# (aus backend/ heraus, damit "app" gefunden wird; .env laden, damit DATABASE_URL
-# auf die NAS zeigt; PYTHONPATH=.. damit "shared/" gefunden wird)
+Das Skript erledigt der Reihe nach:
+
+1. Python-Umgebung `backend/.venv` und Pakete
+2. Verbindungstest zur Datenbank – mit Hinweisen, falls Firewall, `pg_hba.conf`
+   oder Passwort nicht passen
+3. Tabellen und Admin-Benutzer (nur wenn noch nicht vorhanden)
+4. Frontend-Build (`frontend/dist`)
+5. Backend per pm2 starten bzw. neu starten (`monitoring-backend`, nur `127.0.0.1:8000`)
+6. nginx-Site `monitoring-dashboard` auf Port 8080 (fragt vorher; `--nginx` ohne
+   Rückfrage, `--port N` für einen anderen Port). Ist die Konfiguration
+   fehlerhaft, wird die Site wieder deaktiviert – das bestehende nginx bleibt unverändert.
+
+Am Ende zeigt es die Werte für den Collector an. Firewall-Regeln ändert es
+**nicht**, es nennt nur die nötigen Freigaben.
+
+Einmalig, damit pm2 nach einem Neustart automatisch startet: `pm2 startup`
+(den angezeigten `sudo`-Befehl ausführen), danach `pm2 save`.
+
+### 1.3 Update
+
+```bash
+cd /opt/monitoring
+git pull
+./deploy/webserver/install.sh
+```
+
+### 1.4 Admin-Passwort vergessen?
+
+```bash
 cd /opt/monitoring/backend
 set -a; source ../.env; set +a
-PYTHONPATH=.. .venv/bin/python -m app.seed
+PYTHONPATH=.. .venv/bin/python -m app.set_password admin
 ```
 
-### 1.3 Frontend bauen
-
-Falls Frontend und Backend über den bestehenden Reverse-Proxy auf dem Pi unter
-demselben Pfad erreichbar gemacht werden (empfohlen, siehe Abschnitt 3),
-reicht ein normaler Build ohne weitere Konfiguration:
-
-```bash
-cd /opt/monitoring/frontend
-npm install
-npm run build
-```
-
-Falls stattdessen Frontend und Backend auf getrennten Ports ohne
-Pfad-Rewrite laufen sollen, vorher `cp .env.production.example .env.production`
-und `VITE_API_BASE_URL`/`VITE_WS_BASE_URL` auf die öffentliche Backend-Adresse setzen.
-
-### 1.4 Mit pm2 starten
-
-```bash
-cd /opt/monitoring
-pm2 start deploy/webserver/ecosystem.config.js
-pm2 save   # damit die Prozesse einen Reboot überleben
-```
-
-`deploy/webserver/ecosystem.config.js` startet Backend (Uvicorn, Port 8000,
-nur auf `127.0.0.1` gebunden) und Frontend (`serve -s dist`, Port 5173). Die
-`run-backend.sh` lädt dabei die Werte aus der Repo-Root-`.env` in echte
-Umgebungsvariablen (pm2-Ecosystem-Dateien kennen kein `env_file` wie
-docker-compose). Falls das Skript nicht ausführbar ist: `chmod +x
-deploy/webserver/run-backend.sh`.
-
-Logs/Status: `pm2 logs monitoring-backend`, `pm2 status`.
+Das Passwort wird verdeckt abgefragt. Im Dashboard selbst ändert jeder sein
+Passwort unter „Mein Konto“; Admins können unter „Benutzer“ Passwörter zurücksetzen.
 
 ## 2. Router-Pi: nur der Collector
 
 Netzwerk-Setup ist bereits vorhanden – hier geht es nur um den Collector-Prozess selbst.
 
-### 2.1 Collector-Ordner kopieren
+```bash
+git clone https://github.com/ollyIsConfused/Netzwerk-Monitoring-Dashboard.git ~/Netzwerk-Monitoring-Dashboard
+cd ~/Netzwerk-Monitoring-Dashboard
+sudo ./deploy/pi/install-collector.sh
+```
 
-Nur `collector/` wird gebraucht (kein `shared/`, keine DB-Treiber mehr):
+Beim ersten Aufruf legt das Skript `/etc/monitoring-collector.env` an (nur für
+root lesbar) und bricht ab. Dann `sudo nano /etc/monitoring-collector.env`:
+
+- `BACKEND_URL=http://<webserver-ip>:8080/api` (zeigt `install.sh` auf dem Webserver an)
+- `COLLECTOR_API_TOKEN` – exakt derselbe Wert wie in der `.env` auf dem Webserver
+  (dort anzeigen mit `grep ^COLLECTOR_API_TOKEN .env`)
+
+Danach das Skript erneut starten. Es kopiert den Collector nach
+`/opt/monitoring-collector`, richtet die Python-Umgebung ein, **testet die
+Verbindung zum Backend samt Token** (mit klarer Meldung bei falscher URL,
+falschem Token oder blockiertem Port) und startet den systemd-Dienst
+`monitoring-collector`.
+
+Update: `git pull && sudo ./deploy/pi/install-collector.sh`
+Logs: `journalctl -u monitoring-collector -f`
+
+**Firewall:** Der Collector läuft auf dem Router-Pi selbst. ICMP/SNMP in die VLANs
+und die Verbindung zum Webserver sind ausgehender Verkehr des Routers und von
+den Weiterleitungsregeln (`ufw route`) nicht betroffen.
+
+## 3. Dashboard erreichbar machen
+
+Das Dashboard soll nicht öffentlich sein, sondern nur per VPN (bzw. aus dem
+Heimnetz) erreichbar. Dafür braucht es auf dem Router-Pi eine Weiterleitungsregel
+vom VPN zum Webserver-Port, z. B.:
 
 ```bash
-sudo mkdir -p /opt/monitoring-collector
-sudo cp -r collector /opt/monitoring-collector/
-sudo useradd --system --home /opt/monitoring-collector monitoring || true
-cd /opt/monitoring-collector
-python3 -m venv venv
-venv/bin/pip install -r collector/requirements.txt
-sudo chown -R monitoring:monitoring /opt/monitoring-collector
+sudo ufw route allow in on wg0 out on eth0.30 proto tcp from 10.10.10.2 to 192.168.30.15 port 8080
 ```
 
-### 2.2 Konfiguration
+Läuft auf dem Webserver selbst eine Firewall, dort Port 8080 für den Router und
+das VPN freigeben. Danach im Browser: `http://192.168.30.15:8080`.
 
-```bash
-sudo cp deploy/pi/monitoring-collector.env.example /etc/monitoring-collector.env
-sudo chmod 600 /etc/monitoring-collector.env
-sudo $EDITOR /etc/monitoring-collector.env
-```
-
-Eintragen:
-- `BACKEND_URL` – die Adresse, unter der der Webserver-Backend über den
-  Reverse-Proxy erreichbar ist (z. B. `https://dashboard.example.com`), **oder**
-  direkt die interne Adresse (z. B. `http://<webserver-ip>:8000`), wenn der
-  Traffic nicht extra über den Reverse-Proxy laufen soll (spart TLS-Aufwand,
-  ist aber nur vertretbar, weil dieser Traffic ohnehin nur innerhalb des
-  selbst kontrollierten Netzes bleibt – siehe Sicherheits-Hinweis unten).
-- `COLLECTOR_API_TOKEN` – exakt derselbe Wert wie in der `.env` auf dem Webserver.
-
-### 2.3 systemd-Service
-
-```bash
-sudo cp deploy/pi/monitoring-collector.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now monitoring-collector
-sudo systemctl status monitoring-collector
-journalctl -u monitoring-collector -f
-```
-
-### 2.4 Firewall
-
-Der Collector läuft lokal auf dem Router-Pi selbst – ICMP/SNMP in die VLANs
-sind also implizit erlaubt (der Traffic kommt vom Router, nicht von einem
-dritten Host, die bestehenden Inter-VLAN-Regeln greifen hier nicht). Es wird
-nur eine **ausgehende** Freigabe vom Pi zum Backend-Port auf dem Webserver
-gebraucht (z. B. Port 8000 oder 443, je nachdem ob direkt oder über den
-Reverse-Proxy) – das ist auf einem Router i. d. R. ohnehin erlaubt, wenn keine
-restriktive OUTPUT-Policy für den Router-Prozess selbst existiert.
-
-## 3. Dashboard von außen erreichbar machen
-
-Da der Pi bereits einen Reverse-Proxy für andere Dienste betreibt, am
-einfachsten dort einen weiteren Server-Block/Vhost für das Dashboard
-ergänzen (Beispiel nginx-Syntax, sinngemäß für Caddy/Traefik/etc. übertragbar):
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name dashboard.example.com;
-
-    # bestehendes Zertifikat des Pi-Reverse-Proxys verwenden
-
-    location / {
-        proxy_pass http://<webserver-ip>:5173;
-        proxy_set_header Host $host;
-    }
-
-    location /api/ {
-        proxy_pass http://<webserver-ip>:8000/;
-        proxy_set_header Host $host;
-    }
-
-    location /ws/ {
-        proxy_pass http://<webserver-ip>:8000/ws/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-```
-
-Wenn dieser Pfad-Rewrite (`/api/` → Backend-Root) verwendet wird, braucht das
-Frontend **keine** `VITE_API_BASE_URL`/`VITE_WS_BASE_URL` – die Defaults
-(`/api`, `/ws`) passen dann automatisch.
+Soll das Dashboard trotzdem über den Reverse-Proxy auf dem Pi laufen, reicht dort
+ein einziges `reverse_proxy <webserver-ip>:8080` – nginx auf dem Webserver
+verteilt `/api` und `/ws` bereits selbst. Dann den Zugriff unbedingt auf VPN und
+Heimnetz beschränken.
 
 ## 4. Testen
 
 1. Vom Webserver aus die DB-Verbindung prüfen: `psql -h <nas-ip> -U monitoring -d monitoring`
    sollte klappen; derselbe Befehl von einem dritten Host aus sollte an der
    Firewall der NAS abgewiesen werden.
-2. `curl https://dashboard.example.com/api/health` → `{"status":"ok"}`
+2. `curl http://<webserver-ip>:8080/api/health` → `{"status":"ok"}`
 3. Im Dashboard einloggen (`admin` + `SEED_ADMIN_PASSWORD` aus der `.env`)
 4. Ein echtes Gerät anlegen (IP, VLAN, ggf. SNMP-Community) und ein paar
    Minuten warten – `journalctl -u monitoring-collector -f` sollte
@@ -275,7 +240,7 @@ Frontend **keine** `VITE_API_BASE_URL`/`VITE_WS_BASE_URL` – die Defaults
 - Das Postgres-Datenverzeichnis liegt auf dem Festplatten-Array der NAS, nicht
   auf der SD-Karte (Abschnitt 0.2), und wird regelmäßig per `pg_dump` gesichert
   (Abschnitt 0.5).
-- Browser-Zugriff läuft über HTTPS (TLS-Terminierung am bestehenden
-  Reverse-Proxy auf dem Pi).
+- Das Dashboard ist nur per VPN bzw. aus dem Heimnetz erreichbar (Abschnitt 3),
+  das Backend lauscht nur auf `127.0.0.1`.
 - SNMP nach Möglichkeit auf v3 (Auth+Privacy) umstellen, sobald die Geräte es
   unterstützen – v2c überträgt die Community im Klartext.

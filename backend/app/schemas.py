@@ -1,9 +1,41 @@
+import ipaddress
+import re
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from shared.models import AlertLevel, DeviceType, MetricStatus, UserRole
+
+# bcrypt verarbeitet maximal 72 Byte, laengere Passwoerter wuerden still abgeschnitten
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_LENGTH = 72
+
+_HOSTNAME_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))*$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _validate_host(value: str) -> str:
+    value = value.strip()
+    try:
+        ipaddress.ip_address(value)
+        return value
+    except ValueError:
+        pass
+    if not _HOSTNAME_RE.match(value):
+        raise ValueError("Keine gültige IP-Adresse oder kein gültiger Hostname")
+    return value
+
+
+def _validate_email(value: str) -> str:
+    value = value.strip()
+    if not _EMAIL_RE.match(value):
+        raise ValueError("Keine gültige E-Mail-Adresse")
+    return value
+
+
+HostStr = Annotated[str, AfterValidator(_validate_host)]
+EmailStr = Annotated[str, AfterValidator(_validate_email)]
 
 
 class Token(BaseModel):
@@ -20,6 +52,27 @@ class UserOut(BaseModel):
     email: str
     role: UserRole
     is_active: bool
+    created_at: datetime
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    email: EmailStr
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+    role: UserRole = UserRole.viewer
+
+
+class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    role: Optional[UserRole] = None
+    is_active: Optional[bool] = None
+    # Admin setzt ein neues Passwort, z. B. wenn ein Benutzer seins vergessen hat
+    password: Optional[str] = Field(default=None, min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
 
 
 class VlanOut(BaseModel):
@@ -31,8 +84,14 @@ class VlanOut(BaseModel):
 
 
 class VlanCreate(BaseModel):
-    name: str
-    tag: int
+    name: str = Field(min_length=1, max_length=128)
+    tag: int = Field(ge=1, le=4094)
+    description: Optional[str] = None
+
+
+class VlanUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    tag: Optional[int] = Field(default=None, ge=1, le=4094)
     description: Optional[str] = None
 
 
@@ -48,39 +107,47 @@ class ThresholdRuleOut(BaseModel):
 
 
 class ThresholdRuleCreate(BaseModel):
-    metric_name: str
+    metric_name: str = Field(min_length=1, max_length=64)
     warning_max: Optional[float] = None
     critical_max: Optional[float] = None
     warning_min: Optional[float] = None
     critical_min: Optional[float] = None
-    consecutive_breaches_required: int = 2
+    consecutive_breaches_required: int = Field(default=2, ge=1, le=100)
+
+
+class ThresholdRuleUpdate(BaseModel):
+    warning_max: Optional[float] = None
+    critical_max: Optional[float] = None
+    warning_min: Optional[float] = None
+    critical_min: Optional[float] = None
+    consecutive_breaches_required: Optional[int] = Field(default=None, ge=1, le=100)
 
 
 class DeviceCreate(BaseModel):
-    name: str
-    ip_address: str
+    name: str = Field(min_length=1, max_length=128)
+    ip_address: HostStr
     device_type: DeviceType
     vlan_id: Optional[int] = None
     is_active: bool = True
     snmp_enabled: bool = False
     snmp_community: Optional[str] = None
     snmp_version: str = "2c"
-    snmp_port: int = 161
+    snmp_port: int = Field(default=161, ge=1, le=65535)
     snmp_interfaces: Optional[str] = None
     agent_enabled: bool = False
     agent_token: Optional[str] = None
 
 
 class DeviceUpdate(BaseModel):
-    name: Optional[str] = None
-    ip_address: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    ip_address: Optional[HostStr] = None
     device_type: Optional[DeviceType] = None
     vlan_id: Optional[int] = None
     is_active: Optional[bool] = None
     snmp_enabled: Optional[bool] = None
     snmp_community: Optional[str] = None
     snmp_version: Optional[str] = None
-    snmp_port: Optional[int] = None
+    snmp_port: Optional[int] = Field(default=None, ge=1, le=65535)
     snmp_interfaces: Optional[str] = None
     agent_enabled: Optional[bool] = None
     agent_token: Optional[str] = None
@@ -96,6 +163,16 @@ class DeviceOut(BaseModel):
     is_active: bool
     snmp_enabled: bool
     agent_enabled: bool
+
+
+class DeviceConfigOut(DeviceOut):
+    """Vollstaendige Geraetekonfiguration inkl. SNMP-Community/Agent-Token - nur fuer Admins."""
+
+    snmp_community: Optional[str] = None
+    snmp_version: str
+    snmp_port: int
+    snmp_interfaces: Optional[str] = None
+    agent_token: Optional[str] = None
 
 
 class DeviceStatusOut(BaseModel):
