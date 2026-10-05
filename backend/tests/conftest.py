@@ -58,6 +58,38 @@ def login(client: TestClient, username: str, password: str) -> dict:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def activate(client: TestClient, username: str, initial_password: str, new_password: str) -> dict:
+    """Erste Anmeldung eines neu angelegten Benutzers inkl. Pflicht-Passwortwechsel."""
+    headers = login(client, username, initial_password)
+    response = client.post(
+        "/auth/change-password",
+        json={"current_password": initial_password, "new_password": new_password},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
 @pytest.fixture
 def admin_headers(client):
     return login(client, "admin", ADMIN_PASSWORD)
+
+
+class MailBox(list):
+    """Abgefangene E-Mails; mail_ok = False simuliert einen fehlgeschlagenen Versand."""
+
+    mail_ok = True
+
+
+@pytest.fixture
+def sent_mails(monkeypatch) -> MailBox:
+    from shared import notifier
+
+    mails = MailBox()
+
+    def fake_send_email(recipients, subject, body):
+        mails.append({"to": list(recipients), "subject": subject, "body": body})
+        return mails.mail_ok
+
+    monkeypatch.setattr(notifier, "send_email", fake_send_email)
+    return mails

@@ -1,17 +1,29 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { AlertEvent, api, ROLE_LABELS } from "../api/client";
+import { AlertEvent, api, onCountsChanged, ROLE_LABELS, User } from "../api/client";
 import { useAuth } from "../api/AuthContext";
 import { useTheme } from "../theme";
 import { Icon, IconName } from "./Icon";
 
-function NavItem({ to, icon, label, count }: { to: string; icon: IconName; label: string; count?: number }) {
+function NavItem({
+  to,
+  icon,
+  label,
+  count,
+  countLabel,
+}: {
+  to: string;
+  icon: IconName;
+  label: string;
+  count?: number;
+  countLabel?: string;
+}) {
   return (
     <NavLink to={to} end={to === "/"} className="nav-link">
       <Icon name={icon} />
       {label}
       {count ? (
-        <span className="nav-count" aria-label={`${count} aktive Alarme`}>
+        <span className="nav-count" aria-label={`${count} ${countLabel}`}>
           {count}
         </span>
       ) : null}
@@ -23,6 +35,7 @@ export function Layout() {
   const { username, role, logout } = useAuth();
   const [theme, toggleTheme] = useTheme();
   const [activeAlerts, setActiveAlerts] = useState(0);
+  const [passwordRequests, setPasswordRequests] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,17 +43,23 @@ export function Layout() {
       try {
         const response = await api.get<AlertEvent[]>("/alerts", { params: { active_only: true } });
         if (!cancelled) setActiveAlerts(response.data.filter((a) => a.level !== "recovered").length);
+        if (role === "admin") {
+          const users = await api.get<User[]>("/users");
+          if (!cancelled) setPasswordRequests(users.data.filter((u) => u.password_reset_requested_at).length);
+        }
       } catch {
-        // Zaehler ist nur ein Hinweis; Fehler zeigt die jeweilige Seite an
+        // Zaehler sind nur ein Hinweis; Fehler zeigt die jeweilige Seite an
       }
     }
     load();
     const interval = setInterval(load, 30000);
+    const unsubscribe = onCountsChanged(load);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      unsubscribe();
     };
-  }, []);
+  }, [role]);
 
   return (
     <div className="app-shell">
@@ -53,14 +72,20 @@ export function Layout() {
         </div>
 
         <NavItem to="/" icon="dashboard" label="Übersicht" />
-        <NavItem to="/alerts" icon="alert" label="Alarme" count={activeAlerts} />
+        <NavItem to="/alerts" icon="alert" label="Alarme" count={activeAlerts} countLabel="aktive Alarme" />
 
         {role === "admin" && (
           <>
             <div className="nav-section">Verwaltung</div>
             <NavItem to="/admin/devices" icon="server" label="Geräte" />
             <NavItem to="/admin/vlans" icon="network" label="VLANs" />
-            <NavItem to="/admin/users" icon="users" label="Benutzer" />
+            <NavItem
+              to="/admin/users"
+              icon="users"
+              label="Benutzer"
+              count={passwordRequests}
+              countLabel="offene Passwort-Anfragen"
+            />
           </>
         )}
 

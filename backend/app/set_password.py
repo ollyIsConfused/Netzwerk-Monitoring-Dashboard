@@ -12,7 +12,7 @@ from shared.database import SessionLocal, init_db
 from shared.models import User
 
 from .schemas import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH
-from .security import hash_password
+from .security import set_user_password
 
 
 def main() -> int:
@@ -33,10 +33,10 @@ def main() -> int:
             print("Die Passwörter stimmen nicht überein.")
             return 1
 
-        user.hashed_password = hash_password(password)
+        set_user_password(user, password, must_change=False)
         user.is_active = True
         db.commit()
-        print(f"Passwort für '{username}' gesetzt (Konto ist aktiv).")
+        print(f"Passwort für '{username}' gesetzt (Konto ist aktiv, bestehende Anmeldungen sind beendet).")
         return 0
     finally:
         db.close()

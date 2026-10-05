@@ -1,15 +1,20 @@
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from shared.models import AlertEvent, User, UserRole
 
+from ..account_mails import send_temporary_password
 from ..deps import get_db
-from ..schemas import UserCreate, UserOut, UserUpdate
-from ..security import hash_password, require_roles
+from ..schemas import TemporaryPasswordResult, UserCreate, UserOut, UserUpdate
+from ..security import generate_temporary_password, hash_password, require_roles, set_user_password
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 require_admin = require_roles(UserRole.admin)
+
+OWN_PASSWORD_HINT = "Das eigene Passwort bitte unter „Mein Konto“ ändern"
 
 
 def _get_user_or_404(db: Session, user_id: int) -> User:
@@ -49,8 +54,11 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
     user = User(
         username=payload.username,
         email=payload.email,
-        hashed_password=hash_password(payload.password),
+        # Ohne Passwort: zufaelliges, niemandem bekanntes Passwort, bis der Admin ein Einmal-Passwort schickt
+        hashed_password=hash_password(payload.password or secrets.token_urlsafe(32)),
         role=payload.role,
+        # Das Startpasswort kennt der Admin - der Benutzer legt beim ersten Anmelden ein eigenes fest
+        must_change_password=True,
     )
     db.add(user)
     db.commit()
@@ -58,8 +66,10 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
     return user
 
 
-@router.patch("/{user_id}", response_model=UserOut, dependencies=[Depends(require_admin)])
-def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)):
+@router.patch("/{user_id}", response_model=UserOut)
+def update_user(
+    user_id: int, payload: UserUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_admin)
+):
     user = _get_user_or_404(db, user_id)
     changes = payload.model_dump(exclude_unset=True)
 
@@ -76,7 +86,10 @@ def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)
 
     password = changes.pop("password", None)
     if password:
-        user.hashed_password = hash_password(password)
+        # Eigenes Passwort nur mit dem aktuellen Passwort (Mein Konto) - sonst wuerde sich der Admin selbst abmelden
+        if user.id == current_user.id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=OWN_PASSWORD_HINT)
+        set_user_password(user, password, must_change=True)
     for field, value in changes.items():
         if value is not None:
             setattr(user, field, value)
@@ -84,6 +97,28 @@ def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.post("/{user_id}/temporary-password", response_model=TemporaryPasswordResult)
+def send_temporary_password_to_user(
+    user_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_admin)
+):
+    """Erzeugt ein Einmal-Passwort und schickt es an die hinterlegte E-Mail-Adresse des
+    Benutzers. Klappt der Versand nicht, kommt das Passwort einmalig in der Antwort zurueck."""
+    user = _get_user_or_404(db, user_id)
+    if user.id == current_user.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=OWN_PASSWORD_HINT)
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Das Konto ist gesperrt - zuerst wieder aktivieren"
+        )
+
+    password = generate_temporary_password()
+    set_user_password(user, password, must_change=True)
+    db.commit()
+
+    sent = send_temporary_password(user, password)
+    return TemporaryPasswordResult(email=user.email, email_sent=sent, temporary_password=None if sent else password)
 
 
 @router.delete("/{user_id}", status_code=204)

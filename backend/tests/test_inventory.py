@@ -1,7 +1,7 @@
 from shared.database import SessionLocal
 from shared.models import AlertEvent, AlertLevel, MetricSample, MetricStatus
 
-from .conftest import login
+from .conftest import activate
 
 
 def _create_viewer(client, admin_headers):
@@ -10,7 +10,7 @@ def _create_viewer(client, admin_headers):
         json={"username": "viewer", "email": "viewer@example.com", "password": "viewer-pass-1", "role": "viewer"},
         headers=admin_headers,
     )
-    return login(client, "viewer", "viewer-pass-1")
+    return activate(client, "viewer", "viewer-pass-1", "viewer-eigen-1")
 
 
 def test_vlans_require_login(client):

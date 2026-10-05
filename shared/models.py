@@ -16,6 +16,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    false,
 )
 from sqlalchemy.orm import relationship
 
@@ -60,6 +61,14 @@ class User(Base):
     role = Column(Enum(UserRole), nullable=False, default=UserRole.viewer)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Nach Erstanlage oder einem vom Admin gesetzten (Einmal-)Passwort: bis zum eigenen
+    # Passwort erlaubt die Anmeldung nur das Aendern des Passworts
+    must_change_password = Column(Boolean, default=False, nullable=False, server_default=false())
+    # Letzte "Passwort vergessen"-Anfrage - Hinweis in der Benutzerverwaltung und Sperrfrist fuer Mails
+    password_reset_requested_at = Column(DateTime, nullable=True)
+    # Wird bei jedem neuen Passwort erhoeht; Tokens mit aelterer Version (andere Sitzungen) gelten nicht mehr
+    token_version = Column(Integer, default=0, nullable=False, server_default="0")
 
 
 class Vlan(Base):

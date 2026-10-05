@@ -10,13 +10,15 @@ set -euo pipefail
 
 PORT=8080
 SETUP_NGINX=ask
+MAILTEST=no
 
 usage() {
   cat <<EOF
-Aufruf: $0 [--port N] [--nginx | --no-nginx]
+Aufruf: $0 [--port N] [--nginx | --no-nginx] [--mailtest]
   --port N     Port der nginx-Site fuer das Dashboard (Standard: 8080)
   --nginx      nginx-Site ohne Rueckfrage einrichten/aktualisieren
   --no-nginx   nginx-Schritt ueberspringen
+  --mailtest   nur eine Test-Mail mit den SMTP-Werten aus .env schicken (an die Admins)
 EOF
 }
 
@@ -25,6 +27,7 @@ while [ $# -gt 0 ]; do
     --port) PORT="$2"; shift 2 ;;
     --nginx) SETUP_NGINX=yes; shift ;;
     --no-nginx) SETUP_NGINX=no; shift ;;
+    --mailtest) MAILTEST=yes; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unbekannte Option: $1"; usage; exit 1 ;;
   esac
@@ -32,6 +35,8 @@ done
 
 cd "$(dirname "$0")/../.."
 ROOT="$PWD"
+# shellcheck source=../env-tools.sh
+. deploy/env-tools.sh
 
 step() { printf '\n==> %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
@@ -64,38 +69,97 @@ info "Node: $(node --version), pm2: $(pm2 --version)"
 # ---------------------------------------------------------------------------
 step ".env prüfen"
 
-random_secret() { openssl rand -hex 32; }
+ask() {
+  # ask VARIABLE "Frage" [Vorgabe]
+  local answer prompt="$2"
+  [ -n "${3:-}" ] && prompt="$prompt [$3]"
+  read -r -p "    $prompt: " answer
+  printf -v "$1" '%s' "${answer:-${3:-}}"
+}
 
-set_env_value() {
-  # Ersetzt KEY=... in der .env (oder haengt die Zeile an), ohne den Wert anzuzeigen
-  local key="$1" value="$2"
-  if grep -q "^${key}=" .env; then
-    sed -i "s|^${key}=.*|${key}=${value}|" .env
-  else
-    printf '%s=%s\n' "$key" "$value" >> .env
+ask_secret() {
+  # Eingabe wird nicht angezeigt
+  local answer
+  read -r -s -p "    $2: " answer
+  echo
+  printf -v "$1" '%s' "$answer"
+}
+
+first_run_setup() {
+  info "Erste Einrichtung. Die Antworten landen nur in .env (nur für dich lesbar),"
+  info "Passwörter werden bei der Eingabe nicht angezeigt. Enter übernimmt [Vorgaben]."
+  echo
+  info "PostgreSQL-Datenbank (muss schon existieren, siehe docs/deployment.md Abschnitt 0):"
+  ask db_host "  Server (IP oder Name)" "localhost"
+  ask db_port "  Port" "5432"
+  ask db_name "  Datenbank" "monitoring"
+  ask db_user "  Benutzer" "monitoring"
+  ask_secret db_password "  Passwort des Datenbank-Benutzers"
+  [ -n "$db_password" ] || fail "Ohne Datenbank-Passwort geht es nicht. .env löschen und das Skript neu starten."
+  env_set .env DATABASE_URL \
+    "postgresql+psycopg2://$(url_encode "$db_user"):$(url_encode "$db_password")@${db_host}:${db_port}/$(url_encode "$db_name")"
+
+  echo
+  ask admin_email "E-Mail-Adresse des Admins (bekommt die 'Passwort vergessen'-Anfragen)"
+  case "$admin_email" in
+    *@*.*) env_set .env SEED_ADMIN_EMAIL "$admin_email" ;;
+    *) fail "'$admin_email' ist keine E-Mail-Adresse. .env löschen und das Skript neu starten." ;;
+  esac
+
+  echo
+  info "E-Mail-Versand (für Alarme und Passwort-Mails). Leer lassen = später in .env eintragen."
+  ask smtp_host "  SMTP-Server, z. B. smtp.gmail.com" ""
+  if [ -n "$smtp_host" ]; then
+    ask smtp_port "  Port (587 = STARTTLS, 465 = SSL)" "587"
+    ask smtp_user "  Benutzer (meist die E-Mail-Adresse)" "$admin_email"
+    ask_secret smtp_password "  Passwort (bei Gmail ein App-Passwort)"
+    smtp_password_quoted=$(env_quote "$smtp_password") \
+      || fail "Das SMTP-Passwort enthält ein einfaches Anführungszeichen - bitte von Hand in .env eintragen."
+    env_set .env SMTP_HOST "$smtp_host"
+    env_set .env SMTP_PORT "$smtp_port"
+    env_set .env SMTP_USER "$smtp_user"
+    env_set .env SMTP_PASSWORD "$smtp_password_quoted"
+    env_set .env ALERT_EMAIL_TO "$admin_email"
   fi
+  echo
+  info ".env geschrieben. Ändern geht jederzeit mit: nano .env (danach dieses Skript erneut starten)"
 }
 
 if [ ! -f .env ]; then
   cp .env.example .env
   chmod 600 .env
-  set_env_value JWT_SECRET "$(random_secret)"
-  set_env_value COLLECTOR_API_TOKEN "$(random_secret)"
-  fail ".env wurde neu angelegt (JWT_SECRET und COLLECTOR_API_TOKEN sind schon zufällig gesetzt).
+  env_set .env JWT_SECRET "$(random_secret)"
+  env_set .env COLLECTOR_API_TOKEN "$(random_secret)"
+  # In einer echten Umgebung keine Beispiel-VLANs anlegen
+  env_set .env SEED_EXAMPLE_VLANS 0
+  if [ -t 0 ]; then
+    first_run_setup
+  else
+    fail ".env wurde neu angelegt (JWT_SECRET und COLLECTOR_API_TOKEN sind schon zufällig gesetzt).
   Jetzt noch eintragen:  nano .env
-    DATABASE_URL=postgresql+psycopg2://monitoring:<passwort>@<nas-ip>:5432/monitoring
-    SEED_ADMIN_PASSWORD=<passwort für den Benutzer admin>
-  Danach dieses Skript erneut starten."
+    DATABASE_URL=postgresql+psycopg2://monitoring:<passwort>@<datenbank-ip>:5432/monitoring
+    SEED_ADMIN_EMAIL=<deine E-Mail-Adresse>
+    SMTP_...  (optional, für Alarm- und Passwort-Mails)
+  Danach dieses Skript erneut starten (im Terminal fragt es die Werte selbst ab)."
+  fi
 fi
 chmod 600 .env
 
 if grep -q '^JWT_SECRET=change-me' .env || ! grep -q '^JWT_SECRET=.' .env; then
-  set_env_value JWT_SECRET "$(random_secret)"
+  env_set .env JWT_SECRET "$(random_secret)"
   info "JWT_SECRET war ein Platzhalter - Zufallswert gesetzt."
 fi
 if grep -q '^COLLECTOR_API_TOKEN=change-me' .env || ! grep -q '^COLLECTOR_API_TOKEN=.' .env; then
-  set_env_value COLLECTOR_API_TOKEN "$(random_secret)"
+  env_set .env COLLECTOR_API_TOKEN "$(random_secret)"
   warn "COLLECTOR_API_TOKEN war ein Platzhalter - Zufallswert gesetzt. Denselben Wert auf dem Router-Pi eintragen."
+fi
+
+HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+HOST_IP=${HOST_IP:-<webserver-ip>}
+# Fuer Links in den Passwort-Mails; wer das Dashboard ueber einen anderen Namen aufruft, aendert es in .env
+if ! grep -q '^DASHBOARD_URL=.' .env && [ "$HOST_IP" != "<webserver-ip>" ]; then
+  env_set .env DASHBOARD_URL "http://$HOST_IP:$PORT"
+  info "DASHBOARD_URL=http://$HOST_IP:$PORT gesetzt (für Links in E-Mails)"
 fi
 
 set -a
@@ -106,10 +170,17 @@ set +a
 [ -n "${DATABASE_URL:-}" ] || fail "DATABASE_URL fehlt in .env, z. B.:
     DATABASE_URL=postgresql+psycopg2://monitoring:<passwort>@<nas-ip>:5432/monitoring"
 case "$DATABASE_URL" in
-  *localhost*|*127.0.0.1*) warn "DATABASE_URL zeigt auf diesen Rechner. Für die NAS-Datenbank deren IP eintragen." ;;
+  *@localhost[:/]*|*@127.0.0.1[:/]*) info "Datenbank läuft auf diesem Rechner (localhost)" ;;
 esac
-[ -n "${SEED_ADMIN_PASSWORD:-}" ] || warn "SEED_ADMIN_PASSWORD ist leer - ein neuer Admin bekäme das Standardpasswort 'changeme123'."
+[ -n "${SMTP_HOST:-}" ] || warn "SMTP_HOST ist leer - Alarm- und Passwort-Mails werden nicht verschickt (Einmal-Passwörter zeigt dann das Dashboard an)."
 info ".env ok (Werte werden nicht angezeigt)"
+
+if [ "$MAILTEST" = yes ]; then
+  step "Test-Mail"
+  [ -x backend/.venv/bin/python ] || fail "Erst einmal ohne --mailtest installieren."
+  (cd backend && PYTHONPATH="$ROOT" .venv/bin/python -m app.mailtest) | sed 's/^/    /'
+  exit "${PIPESTATUS[0]}"
+fi
 
 # ---------------------------------------------------------------------------
 step "Backend: Python-Umgebung und Pakete"
@@ -248,14 +319,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-HOST_IP=${HOST_IP:-<webserver-ip>}
-
 step "Fertig"
 cat <<EOF
-    Dashboard:          http://$HOST_IP:$PORT   (Login: admin)
+    Dashboard:          http://$HOST_IP:$PORT
+    Erste Anmeldung:    Benutzer admin, Passwort admin (bzw. SEED_ADMIN_PASSWORD) -
+                        danach muss sofort ein eigenes Passwort festgelegt werden
     Update später:      git pull && ./deploy/webserver/install.sh
     Backend-Logs:       pm2 logs monitoring-backend
+    Test-Mail:          ./deploy/webserver/install.sh --mailtest
 
     Für den Collector auf dem Router-Pi (/etc/monitoring-collector.env):
       BACKEND_URL=http://$HOST_IP:$PORT/api
@@ -266,5 +337,5 @@ cat <<EOF
       - Läuft hier selbst ufw:  sudo ufw allow from <router-ip-im-vlan> to any port $PORT proto tcp
 EOF
 if [ -n "${SMTP_HOST:-}" ]; then
-  info "  - Alarm-Mails: ausgehend Port ${SMTP_PORT:-587} zu $SMTP_HOST muss erlaubt sein."
+  info "  - E-Mails: ausgehend Port ${SMTP_PORT:-587} zu $SMTP_HOST muss erlaubt sein."
 fi

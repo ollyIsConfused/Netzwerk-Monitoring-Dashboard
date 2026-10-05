@@ -3,16 +3,20 @@ import { AuthProvider, useAuth } from "./api/AuthContext";
 import { Layout } from "./components/Layout";
 import { AccountPage } from "./pages/AccountPage";
 import { AlertsPage } from "./pages/AlertsPage";
+import { ChangePasswordRequiredPage } from "./pages/ChangePasswordRequiredPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DeviceDetailPage } from "./pages/DeviceDetailPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { LoginPage } from "./pages/LoginPage";
 import { DevicesAdminPage } from "./pages/admin/DevicesAdminPage";
 import { UsersAdminPage } from "./pages/admin/UsersAdminPage";
 import { VlansAdminPage } from "./pages/admin/VlansAdminPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, mustChangePassword } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  // Start- oder Einmal-Passwort: das Backend erlaubt bis zum eigenen Passwort ohnehin nichts anderes
+  if (mustChangePassword) return <ChangePasswordRequiredPage />;
   return children;
 }
 
@@ -29,6 +33,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route
             element={
               <RequireAuth>

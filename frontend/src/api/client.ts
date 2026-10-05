@@ -17,6 +17,27 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Muss exakt dem Text im Backend entsprechen (backend/app/security.py)
+export const PASSWORD_CHANGE_REQUIRED = "Bitte zuerst ein eigenes Passwort festlegen";
+
+export const SESSION_KEYS = ["token", "role", "username", "mustChangePassword"] as const;
+
+// Seitenleisten-Zaehler (Alarme, Passwort-Anfragen) sofort statt erst beim naechsten Abruf aktualisieren
+const COUNTS_CHANGED_EVENT = "monitoring:counts-changed";
+
+export function notifyCountsChanged() {
+  window.dispatchEvent(new Event(COUNTS_CHANGED_EVENT));
+}
+
+export function onCountsChanged(handler: () => void): () => void {
+  window.addEventListener(COUNTS_CHANGED_EVENT, handler);
+  return () => window.removeEventListener(COUNTS_CHANGED_EVENT, handler);
+}
+
+export function clearSession() {
+  SESSION_KEYS.forEach((key) => localStorage.removeItem(key));
+}
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -24,11 +45,16 @@ api.interceptors.response.use(
     // fehlgeschlagene Login-Versuch selbst (der zeigt seine Meldung im Formular)
     const isLoginRequest = String(error.config?.url ?? "").endsWith("/auth/login");
     if (error.response?.status === 401 && !isLoginRequest) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("role");
-      localStorage.removeItem("username");
+      clearSession();
       if (window.location.pathname !== "/login") {
         window.location.href = "/login";
+      }
+    }
+    // Admin hat in der Zwischenzeit ein neues Passwort gesetzt: erst eigenes Passwort festlegen
+    if (error.response?.status === 403 && error.response.data?.detail === PASSWORD_CHANGE_REQUIRED) {
+      if (localStorage.getItem("mustChangePassword") !== "1") {
+        localStorage.setItem("mustChangePassword", "1");
+        window.location.href = "/";
       }
     }
     return Promise.reject(error);
@@ -96,6 +122,21 @@ export interface User {
   role: UserRole;
   is_active: boolean;
   created_at: string;
+  must_change_password: boolean;
+  password_reset_requested_at: string | null;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  role: UserRole;
+  username: string;
+  must_change_password: boolean;
+}
+
+export interface TemporaryPasswordResult {
+  email: string;
+  email_sent: boolean;
+  temporary_password: string | null;
 }
 
 export interface Vlan {
