@@ -95,6 +95,13 @@ def record_metric(
             )
             db.add(event)
     elif last_level in (AlertLevel.warning, AlertLevel.critical):
+        # Offene Warnungen/kritische Alarme dieser Metrik gelten mit der Erholung als erledigt
+        db.query(AlertEvent).filter(
+            AlertEvent.device_id == device.id,
+            AlertEvent.metric_name == metric_name,
+            AlertEvent.resolved_at.is_(None),
+            AlertEvent.level.in_([AlertLevel.warning, AlertLevel.critical]),
+        ).update({AlertEvent.resolved_at: sample.timestamp}, synchronize_session=False)
         event = AlertEvent(
             device_id=device.id,
             metric_name=metric_name,

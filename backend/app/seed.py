@@ -24,7 +24,11 @@ def main() -> None:
                     role=UserRole.admin,
                 )
             )
-            print(f"Admin-Benutzer 'admin' angelegt (Passwort: {admin_password}) - bitte nach dem ersten Login ändern.")
+            # Passwort bewusst nicht ausgeben (landet sonst in Terminal-Verlauf und Logs)
+            if os.environ.get("SEED_ADMIN_PASSWORD"):
+                print("Admin-Benutzer 'admin' angelegt (Passwort aus SEED_ADMIN_PASSWORD).")
+            else:
+                print("Admin-Benutzer 'admin' mit Standardpasswort 'changeme123' angelegt - bitte sofort ändern!")
 
         if db.query(Vlan).count() == 0:
             db.add_all(

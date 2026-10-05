@@ -43,9 +43,21 @@ einem bestehenden Webserver mit pm2) stehen in
   Switch/Router-Interface-Zähler → daraus abgeleitete Bandbreite) und schickt
   die Rohwerte per HTTPS ans Backend; Schwellenwertauswertung/Alarme passieren
   zentral im Backend.
-- **`frontend/`** – React/Vite-Dashboard: VLAN-Übersicht mit Live-Status
-  (WebSocket), Geräte-Detailseite mit Zeitreihen-Diagrammen, Alarmliste mit
-  Quittierfunktion.
+- **`frontend/`** – React/Vite-Dashboard (Hell-/Dunkelmodus): VLAN-Übersicht mit
+  Live-Status (WebSocket) und Kennzahlen, Geräte-Detailseite mit Zeitreihen-Diagrammen
+  inkl. Schwellenwert-Linien, Alarmliste mit Quittierfunktion. Für Admins:
+  Verwaltung von Geräten (inkl. SNMP/Agent), VLANs, Schwellenwerten und Benutzern;
+  für alle: Passwort ändern unter „Mein Konto“.
+
+### Rollen
+
+| Rolle | Darf |
+|---|---|
+| Admin | alles, inkl. Geräte, VLANs, Schwellenwerte und Benutzer verwalten |
+| Operator | alles sehen und Alarme quittieren |
+| Betrachter (viewer) | nur ansehen |
+
+Der letzte aktive Admin kann weder herabgestuft, gesperrt noch gelöscht werden.
 
 ## Setup (lokal mit Docker Compose)
 
@@ -85,11 +97,33 @@ Strg+C beendet Backend und Frontend):
 Der Seed legt den Admin nur beim ersten Mal an. Ein später in `.env`
 geändertes `SEED_ADMIN_PASSWORD` ändert das bestehende Passwort nicht.
 
-Danach im Dashboard (oder direkt über die API) die echten Geräte anlegen:
-IP-Adresse, VLAN-Zuordnung, für Switch/Router die SNMP-Community und zu
-überwachende Interface-Indizes, für NAS/Webserver optional ein Agent-Token für
-eigene Push-Metriken. Anschließend je Gerät Schwellenwerte (`warning_max`,
-`critical_max`, …) über `POST /devices/{id}/thresholds` hinterlegen.
+Danach im Dashboard unter **Verwaltung** zuerst die VLANs, dann die Geräte
+anlegen (IP-Adresse, VLAN, für Switch/Router SNMP-Community und Interface-Indizes,
+für NAS/Webserver optional ein Agent-Token). Auf der Detailseite eines Geräts
+lassen sich Schwellenwerte anlegen, z. B. mit der Vorlage „Offline-Alarm“.
+
+Admin-Passwort vergessen? Aus `backend/` heraus (mit geladener `.env`):
+`PYTHONPATH=.. .venv/bin/python -m app.set_password admin` – fragt das neue
+Passwort verdeckt ab.
+
+## Tests
+
+```bash
+cd backend
+.venv/bin/pip install -r requirements-dev.txt
+PYTHONPATH=.. .venv/bin/pytest
+```
+
+Die Tests laufen gegen eine temporäre SQLite-Datenbank (kein PostgreSQL nötig)
+und decken Anmeldung, Benutzerverwaltung, VLAN-/Geräte-/Schwellenwert-Verwaltung
+und den Alarm-Ablauf über den Collector-Endpunkt ab.
+
+## Installation im Homelab
+
+Für den produktiven Betrieb (Backend + Frontend auf dem Webserver, Datenbank auf
+der NAS, Collector auf dem Router-Pi) gibt es Installationsskripte, die auch als
+Update dienen: `deploy/webserver/install.sh` und `deploy/pi/install-collector.sh`.
+Schritt-für-Schritt-Anleitung: [`docs/deployment.md`](docs/deployment.md).
 
 ## Eigener Agent (Beispiel für NAS/Webserver)
 

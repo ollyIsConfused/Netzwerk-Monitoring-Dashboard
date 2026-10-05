@@ -1,56 +1,73 @@
 import { FormEvent, useState } from "react";
 import { Navigate } from "react-router-dom";
+import { apiErrorMessage } from "../api/client";
 import { useAuth } from "../api/AuthContext";
+import { Icon } from "../components/Icon";
+import { Notice } from "../components/Modal";
 
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   if (isAuthenticated) return <Navigate to="/" replace />;
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    setBusy(true);
     try {
-      await login(username, password);
-    } catch {
-      setError("Anmeldung fehlgeschlagen. Bitte Benutzername/Passwort prüfen.");
+      await login(username.trim(), password);
+    } catch (err) {
+      // Unterscheidet "falsches Passwort" von "Backend nicht erreichbar"
+      setError(apiErrorMessage(err, "Anmeldung fehlgeschlagen."));
+      setBusy(false);
     }
   }
 
   return (
-    <div style={{ display: "flex", justifyContent: "center", marginTop: 100 }}>
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-          width: 320,
-          padding: 24,
-          border: "1px solid #d0d7de",
-          borderRadius: 8,
-          background: "#fff",
-        }}
-      >
-        <h2 style={{ margin: 0 }}>Netzwerk-Monitoring</h2>
-        <input
-          placeholder="Benutzername"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-        />
-        <input
-          placeholder="Passwort"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        {error && <div style={{ color: "#cf222e", fontSize: 14 }}>{error}</div>}
-        <button type="submit">Anmelden</button>
+    <div className="login-page">
+      <form className="card login-card form" onSubmit={handleSubmit}>
+        <div className="brand">
+          <span className="brand-mark">
+            <Icon name="network" size={17} />
+          </span>
+          Netzwerk-Monitoring
+        </div>
+        <div>
+          <h1>Anmelden</h1>
+          <p className="muted" style={{ margin: "4px 0 0" }}>
+            Mit deinem Benutzernamen, nicht der E-Mail-Adresse.
+          </p>
+        </div>
+        <label className="field">
+          <span>Benutzername</span>
+          <input
+            className="input"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+            autoFocus
+          />
+        </label>
+        <label className="field">
+          <span>Passwort</span>
+          <input
+            className="input"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </label>
+        {error && <Notice kind="error">{error}</Notice>}
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? "Anmelden…" : "Anmelden"}
+        </button>
       </form>
     </div>
   );

@@ -1,10 +1,8 @@
-// pm2 ecosystem file fuer Backend + Frontend auf dem Webserver.
+// pm2 ecosystem file fuer das Backend auf dem Webserver.
 // Start (von beliebigem Verzeichnis aus):  pm2 start deploy/webserver/ecosystem.config.js
-// Vorher: backend/.venv anlegen und Requirements installieren, Repo-Root/.env
-//         befuellen (siehe .env.example) und Frontend einmalig bauen (npm run build)
-//         - siehe docs/deployment.md fuer die vollstaendige Anleitung.
-const path = require("path");
-
+// Am einfachsten richtet deploy/webserver/install.sh alles ein (venv, Build, pm2, nginx).
+// Das Frontend liefert nginx als statischen Build aus (nginx-monitoring.conf.template),
+// daher laeuft hier nur noch das Backend.
 module.exports = {
   apps: [
     {
@@ -12,13 +10,6 @@ module.exports = {
       cwd: __dirname,
       script: "./run-backend.sh",
       interpreter: "bash",
-      autorestart: true,
-    },
-    {
-      name: "monitoring-frontend",
-      cwd: path.join(__dirname, "..", "..", "frontend"),
-      script: "npx",
-      args: "serve -s dist -l 5173",
       autorestart: true,
     },
   ],
