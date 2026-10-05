@@ -3,6 +3,9 @@ __pycache__/
 .venv/
 venv/
 .env
+# auch Kopien wie .env.bak oder .env.production - nur die Vorlagen gehoeren ins Repo
+.env.*
+!*.example
 node_modules/
 frontend/dist/
 .DS_Store
