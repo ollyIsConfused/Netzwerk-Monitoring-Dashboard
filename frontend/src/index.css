@@ -770,6 +770,47 @@ textarea.input {
   padding: 0 0 18px;
 }
 
+/* Lockfeld gegen Bots: fuer Menschen unsichtbar, im HTML aber vorhanden (bewusst kein
+   display:none - das erkennen manche Bots und ueberspringen das Feld) */
+.hp-field {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.login-links {
+  text-align: center;
+  font-size: 13px;
+}
+
+/* ---------- Benutzerverwaltung ---------- */
+
+.cell-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.badge-request {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.secret-box {
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 18px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  user-select: all;
+}
+
 /* ---------- Diagramme ---------- */
 
 .chart-card .card-body {

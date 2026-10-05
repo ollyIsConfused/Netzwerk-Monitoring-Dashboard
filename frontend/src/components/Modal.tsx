@@ -61,17 +61,19 @@ export function Notice({ kind, children }: { kind: "error" | "success" | "info";
   );
 }
 
-/** Bestaetigungsdialog fuer Loeschaktionen; zeigt Fehler aus onConfirm im Dialog an. */
+/** Bestaetigungsdialog (standardmaessig fuer Loeschaktionen); zeigt Fehler aus onConfirm im Dialog an. */
 export function ConfirmDialog({
   title,
   message,
   confirmLabel = "Löschen",
+  danger = true,
   onConfirm,
   onClose,
 }: {
   title: string;
   message: ReactNode;
   confirmLabel?: string;
+  danger?: boolean;
   onConfirm: () => Promise<void>;
   onClose: () => void;
 }) {
@@ -99,7 +101,12 @@ export function ConfirmDialog({
           <button type="button" className="btn" onClick={onClose}>
             Abbrechen
           </button>
-          <button type="button" className="btn btn-danger-solid" onClick={confirm} disabled={busy}>
+          <button
+            type="button"
+            className={`btn ${danger ? "btn-danger-solid" : "btn-primary"}`}
+            onClick={confirm}
+            disabled={busy}
+          >
             {confirmLabel}
           </button>
         </div>

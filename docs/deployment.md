@@ -106,7 +106,7 @@ sudo -u postgres pg_dump monitoring | gzip > /mnt/storage/backups/monitoring-$(d
 Voraussetzungen (einmalig): `git`, Python 3.10–3.12 mit `venv`, Node.js ≥ 18,
 `pm2` (`sudo npm install -g pm2`) und nginx.
 
-### 1.1 Repo holen und `.env` ausfüllen
+### 1.1 Repo holen und installieren
 
 ```bash
 sudo git clone https://github.com/ollyIsConfused/Netzwerk-Monitoring-Dashboard.git /opt/monitoring
@@ -116,28 +116,26 @@ cd /opt/monitoring
 ```
 
 Beim ersten Aufruf legt das Skript die `.env` an (Rechte `600`, `JWT_SECRET` und
-`COLLECTOR_API_TOKEN` schon zufällig gesetzt) und bricht mit einem Hinweis ab.
-Dann `nano .env` und eintragen:
+`COLLECTOR_API_TOKEN` zufällig) und fragt im Terminal nach:
 
-- `DATABASE_URL=postgresql+psycopg2://monitoring:<passwort>@<nas-ip>:5432/monitoring`
-  (Postgres auf der NAS, siehe Abschnitt 0 – nicht `localhost`; Sonderzeichen im
-  Passwort wie `@ : / #` URL-kodiert)
-- `SEED_ADMIN_PASSWORD` – Passwort für den Benutzer `admin`. Bei Sonderzeichen in
-  einfache Anführungszeichen setzen: `SEED_ADMIN_PASSWORD='…'`
-- optional SMTP-Zugangsdaten für Alarm-Mails (bei Gmail ein App-Passwort)
+- **Datenbank:** Server, Port, Name, Benutzer und Passwort (Postgres auf der NAS,
+  siehe Abschnitt 0). Daraus baut es die `DATABASE_URL`, Sonderzeichen im Passwort
+  werden automatisch kodiert.
+- **E-Mail-Adresse des Admins:** bekommt die „Passwort vergessen“-Anfragen.
+- **SMTP (optional):** Server, Port, Benutzer, Passwort für Alarm- und Passwort-Mails.
+  Leer lassen, um das später in der `.env` nachzutragen.
 
-### 1.2 Installieren
+Passwörter werden bei der Eingabe nicht angezeigt und landen nur in der `.env`.
+Ohne Terminal (z. B. per Skript) bricht es stattdessen ab und nennt die Werte, die
+von Hand mit `nano .env` einzutragen sind.
 
-```bash
-./deploy/webserver/install.sh
-```
-
-Das Skript erledigt der Reihe nach:
+### 1.2 Was das Skript macht
 
 1. Python-Umgebung `backend/.venv` und Pakete
 2. Verbindungstest zur Datenbank – mit Hinweisen, falls Firewall, `pg_hba.conf`
    oder Passwort nicht passen
-3. Tabellen und Admin-Benutzer (nur wenn noch nicht vorhanden)
+3. Tabellen und Admin-Benutzer (nur wenn noch nicht vorhanden). Neue Spalten aus
+   späteren Versionen ergänzt es in einer bestehenden Datenbank automatisch.
 4. Frontend-Build (`frontend/dist`)
 5. Backend per pm2 starten bzw. neu starten (`monitoring-backend`, nur `127.0.0.1:8000`)
 6. nginx-Site `monitoring-dashboard` auf Port 8080 (fragt vorher; `--nginx` ohne
@@ -158,7 +156,20 @@ git pull
 ./deploy/webserver/install.sh
 ```
 
-### 1.4 Admin-Passwort vergessen?
+### 1.4 Erste Anmeldung und Passwörter
+
+Erste Anmeldung im Dashboard: Benutzer `admin`, Passwort `admin`. Das Dashboard
+verlangt sofort ein eigenes Passwort, vorher ist nichts anderes erreichbar. Bis
+dahin kann sich jeder im Netz mit `admin`/`admin` anmelden, deshalb direkt nach
+der Installation anmelden.
+
+Hat jemand sein Passwort vergessen, nutzt er auf der Anmeldeseite „Passwort
+vergessen?“ (Benutzername + E-Mail). Der Admin bekommt eine Mail und schickt unter
+*Verwaltung > Benutzer* mit dem Schlüssel-Symbol ein Einmal-Passwort an die beim
+Konto hinterlegte Adresse. Ablauf und Schutzmaßnahmen: siehe README, Abschnitt
+„Konten und Passwörter“.
+
+Admin selbst ausgesperrt:
 
 ```bash
 cd /opt/monitoring/backend
@@ -166,8 +177,24 @@ set -a; source ../.env; set +a
 PYTHONPATH=.. .venv/bin/python -m app.set_password admin
 ```
 
-Das Passwort wird verdeckt abgefragt. Im Dashboard selbst ändert jeder sein
-Passwort unter „Mein Konto“; Admins können unter „Benutzer“ Passwörter zurücksetzen.
+### 1.5 E-Mail (SMTP)
+
+Steht in der `.env` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`). Bei
+Gmail: `smtp.gmail.com`, Port `587`, als Passwort ein App-Passwort (Google-Konto >
+Sicherheit > 2-Faktor-Bestätigung > App-Passwörter), nicht das normale
+Konto-Passwort. Werte mit Leerzeichen in einfache Anführungszeichen setzen.
+
+Testen:
+
+```bash
+./deploy/webserver/install.sh --mailtest
+```
+
+Das schickt eine Test-Mail an die Admin-Adresse. Die Firewall muss vom Webserver
+ausgehend Port 587 (bzw. 465) erlauben. Links in den Mails zeigen auf
+`DASHBOARD_URL`. Das Skript setzt dafür `http://<webserver-ip>:8080`. Wer das
+Dashboard über eine andere Adresse aufruft, ändert den Wert in der `.env` und
+startet das Skript erneut.
 
 ## 2. Router-Pi: nur der Collector
 
@@ -223,7 +250,7 @@ Heimnetz beschränken.
    sollte klappen; derselbe Befehl von einem dritten Host aus sollte an der
    Firewall der NAS abgewiesen werden.
 2. `curl http://<webserver-ip>:8080/api/health` → `{"status":"ok"}`
-3. Im Dashboard einloggen (`admin` + `SEED_ADMIN_PASSWORD` aus der `.env`)
+3. Im Dashboard einloggen (`admin` / `admin`) und ein eigenes Passwort festlegen
 4. Ein echtes Gerät anlegen (IP, VLAN, ggf. SNMP-Community) und ein paar
    Minuten warten – `journalctl -u monitoring-collector -f` sollte
    Poll-Zyklen zeigen, im Dashboard sollte der Status auf „OK“ springen.
@@ -234,6 +261,8 @@ Heimnetz beschränken.
 
 - `JWT_SECRET` und `COLLECTOR_API_TOKEN` sind echte Zufallsstrings, nicht die
   Beispielwerte aus `.env.example`.
+- Das Startpasswort `admin` ist direkt nach der Installation durch ein eigenes
+  ersetzt (Abschnitt 1.4), und beim Admin ist eine echte E-Mail-Adresse hinterlegt.
 - Postgres auf der NAS ist per `listen_addresses` + `pg_hba.conf` + Firewall
   ausschließlich für die Webserver-IP erreichbar (siehe Abschnitt 0.4) – nicht
   fürs restliche Netz offen.

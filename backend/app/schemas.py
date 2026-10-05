@@ -43,6 +43,7 @@ class Token(BaseModel):
     token_type: str = "bearer"
     role: UserRole
     username: str
+    must_change_password: bool = False
 
 
 class UserOut(BaseModel):
@@ -53,12 +54,15 @@ class UserOut(BaseModel):
     role: UserRole
     is_active: bool
     created_at: datetime
+    must_change_password: bool
+    password_reset_requested_at: Optional[datetime]
 
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
     email: EmailStr
-    password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+    # Ohne Passwort: der Admin schickt danach ein Einmal-Passwort per E-Mail
+    password: Optional[str] = Field(default=None, min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
     role: UserRole = UserRole.viewer
 
 
@@ -73,6 +77,20 @@ class UserUpdate(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+
+
+class ForgotPasswordRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    email: EmailStr
+    # Lockfeld (Honeypot): im Formular unsichtbar, muss leer bleiben
+    phone: str = Field(default="", max_length=200)
+
+
+class TemporaryPasswordResult(BaseModel):
+    email: str
+    email_sent: bool
+    # Nur wenn die E-Mail nicht rausging - dann gibt der Admin das Passwort selbst weiter
+    temporary_password: Optional[str] = None
 
 
 class VlanOut(BaseModel):

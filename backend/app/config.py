@@ -9,3 +9,10 @@ ALERT_DISPATCH_INTERVAL_SECONDS = int(os.environ.get("ALERT_DISPATCH_INTERVAL_SE
 
 # Shared secret used by the collector service instead of a per-user JWT.
 COLLECTOR_API_TOKEN = os.environ.get("COLLECTOR_API_TOKEN", "")
+
+# Empfaenger fuer "Passwort vergessen"-Anfragen (mehrere mit Komma); leer = alle aktiven Admins
+ADMIN_NOTIFY_EMAIL = os.environ.get("ADMIN_NOTIFY_EMAIL", "")
+# Adresse des Dashboards fuer Links in E-Mails, z. B. http://192.168.30.15:8080 (optional)
+DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "").rstrip("/")
+# Mindestabstand zwischen zwei "Passwort vergessen"-Mails fuer dasselbe Konto
+PASSWORD_RESET_COOLDOWN_MINUTES = int(os.environ.get("PASSWORD_RESET_COOLDOWN_MINUTES", "15"))
