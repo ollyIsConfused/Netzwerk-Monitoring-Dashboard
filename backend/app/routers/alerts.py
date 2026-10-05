@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from shared.models import AlertEvent, User, UserRole
+from shared.models import AlertEvent, AlertLevel, User, UserRole
 
 from ..deps import get_db
 from ..schemas import AlertEventOut
@@ -24,7 +24,12 @@ def list_alerts(
     if device_id is not None:
         query = query.filter(AlertEvent.device_id == device_id)
     if active_only:
-        query = query.filter(AlertEvent.resolved_at.is_(None), AlertEvent.acknowledged_at.is_(None))
+        # Aktiv = Problem besteht noch und wurde nicht quittiert; "behoben"-Meldungen sind nur Historie
+        query = query.filter(
+            AlertEvent.resolved_at.is_(None),
+            AlertEvent.acknowledged_at.is_(None),
+            AlertEvent.level != AlertLevel.recovered,
+        )
     return query.order_by(AlertEvent.created_at.desc()).limit(limit).all()
 
 
