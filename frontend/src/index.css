@@ -770,6 +770,16 @@ textarea.input {
   padding: 0 0 18px;
 }
 
+/* Lockfeld gegen Bots: fuer Menschen unsichtbar, im HTML aber vorhanden (bewusst kein
+   display:none - das erkennen manche Bots und ueberspringen das Feld) */
+.hp-field {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 .login-links {
   text-align: center;
   font-size: 13px;
