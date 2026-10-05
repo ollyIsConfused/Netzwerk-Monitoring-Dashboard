@@ -82,6 +82,8 @@ class PasswordChange(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     email: EmailStr
+    # Lockfeld (Honeypot): im Formular unsichtbar, muss leer bleiben
+    phone: str = Field(default="", max_length=200)
 
 
 class TemporaryPasswordResult(BaseModel):

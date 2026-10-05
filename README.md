@@ -79,6 +79,13 @@ Der letzte aktive Admin kann weder herabgestuft, gesperrt noch gelöscht werden.
 - **Schutz:** Die Antwort auf „Passwort vergessen“ ist immer gleich (man kann nicht
   ausprobieren, welche Konten es gibt). Pro Konto geht höchstens alle 15 Minuten eine
   Mail raus. Jede Passwortänderung meldet alle anderen Sitzungen dieses Kontos ab.
+- **Lockfelder gegen Bots (Honeypot):** Anmeldung und „Passwort vergessen“ enthalten
+  je ein für Menschen unsichtbares Feld („E-Mail-Adresse“ bzw. „Telefonnummer“).
+  Ist es ausgefüllt, weist das Backend die Anfrage ab (bei der Anmeldung mit derselben
+  Meldung wie bei falschem Passwort) und schreibt eine Warnung ins Log. Das hält
+  einfache Formular-Bots auf, die jedes Feld ausfüllen. Bots und KI-Agenten, die nur
+  sichtbare Felder bedienen, erkennt es nicht. Den eigentlichen Schutz liefern starke
+  Passwörter und dass das Dashboard nur per VPN bzw. aus dem Heimnetz erreichbar ist.
 - **Admin ausgesperrt?** Aus `backend/` heraus (mit geladener `.env`):
   `PYTHONPATH=.. .venv/bin/python -m app.set_password admin`. Das Passwort wird
   verdeckt abgefragt.

@@ -7,7 +7,8 @@ interface AuthState {
   isAuthenticated: boolean;
   /** Nach Erstanlage oder Einmal-Passwort: erst ein eigenes Passwort festlegen */
   mustChangePassword: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  /** honeypot: Inhalt des unsichtbaren Lockfelds (bei Menschen leer) */
+  login: (username: string, password: string, honeypot?: string) => Promise<void>;
   /** Nach einer Passwortaenderung: das Backend schickt ein neues Token (alte Sitzungen sind beendet) */
   applyToken: (token: TokenResponse) => void;
   logout: () => void;
@@ -34,10 +35,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMustChangePassword(token.must_change_password);
   }
 
-  async function login(usernameInput: string, password: string) {
+  async function login(usernameInput: string, password: string, honeypot = "") {
     const form = new URLSearchParams();
     form.set("username", usernameInput);
     form.set("password", password);
+    form.set("email", honeypot);
     const response = await api.post<TokenResponse>("/auth/login", form, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });

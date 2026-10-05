@@ -1,7 +1,8 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { api, apiErrorMessage } from "../api/client";
 import { useAuth } from "../api/AuthContext";
+import { HoneypotField } from "../components/HoneypotField";
 import { Icon } from "../components/Icon";
 import { Notice } from "../components/Modal";
 
@@ -12,6 +13,7 @@ export function ForgotPasswordPage() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const honeypot = useRef<HTMLInputElement>(null);
 
   if (isAuthenticated) return <Navigate to="/" replace />;
 
@@ -20,7 +22,11 @@ export function ForgotPasswordPage() {
     setError(null);
     setBusy(true);
     try {
-      await api.post("/auth/forgot-password", { username: username.trim(), email: email.trim() });
+      await api.post("/auth/forgot-password", {
+        username: username.trim(),
+        email: email.trim(),
+        phone: honeypot.current?.value ?? "",
+      });
       setSent(true);
     } catch (err) {
       setError(apiErrorMessage(err, "Anfrage fehlgeschlagen."));
@@ -75,6 +81,7 @@ export function ForgotPasswordPage() {
               />
               <small>Die Adresse, die bei deinem Konto hinterlegt ist.</small>
             </label>
+            <HoneypotField ref={honeypot} name="phone" label="Telefonnummer" />
             {error && <Notice kind="error">{error}</Notice>}
             <button type="submit" className="btn btn-primary" disabled={busy}>
               {busy ? "Senden…" : "Anfrage senden"}

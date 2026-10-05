@@ -189,3 +189,22 @@ def test_add_missing_columns_upgrades_old_database(tmp_path):
         row = conn.execute(text("SELECT must_change_password, token_version FROM users")).one()
     assert tuple(row) == (0, 0)
     assert "token_version" in {c["name"] for c in inspect(engine).get_columns("users")}
+
+
+def test_honeypot_fields_block_bots(client, admin_headers, sent_mails):
+    from .conftest import ADMIN_PASSWORD
+
+    # Richtiges Passwort, aber das unsichtbare Feld ist ausgefuellt -> wie falsches Passwort
+    bot = client.post("/auth/login", data={"username": "admin", "password": ADMIN_PASSWORD, "email": "bot@example.com"})
+    assert bot.status_code == 401
+    assert bot.json()["detail"] == "Benutzername oder Passwort falsch"
+    assert client.post(
+        "/auth/login", data={"username": "admin", "password": ADMIN_PASSWORD, "email": ""}
+    ).status_code == 200
+
+    _create_user(client, admin_headers)
+    human = {"username": "anna", "email": "anna@example.com"}
+    bot_reply = client.post("/auth/forgot-password", json={**human, "phone": "0123456"})
+    assert bot_reply.status_code == 202 and sent_mails == []
+    assert client.post("/auth/forgot-password", json=human).json() == bot_reply.json()
+    assert len(sent_mails) == 1

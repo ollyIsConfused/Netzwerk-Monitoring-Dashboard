@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -31,11 +31,25 @@ def _token_response(user: User) -> Token:
     )
 
 
+LOGIN_FAILED = "Benutzername oder Passwort falsch"
+
+
 @router.post("/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    # Lockfeld (Honeypot): im Anmeldeformular unsichtbar. Menschen lassen es leer, einfache
+    # Bots fuellen jedes Feld aus - die bekommen dieselbe Antwort wie bei falschem Passwort.
+    email: str = Form(default=""),
+    db: Session = Depends(get_db),
+):
+    if email:
+        logger.warning("Anmeldung abgewiesen: unsichtbares Feld ausgefüllt (vermutlich Bot), Benutzername %r",
+                       form_data.username)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=LOGIN_FAILED)
+
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not user.is_active or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Benutzername oder Passwort falsch")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=LOGIN_FAILED)
     return _token_response(user)
 
 
@@ -70,6 +84,11 @@ def forgot_password(
     """Ohne Anmeldung. Benachrichtigt die Admins, wenn Benutzername und E-Mail zu einem
     aktiven Konto passen. Die Antwort ist immer dieselbe, damit sich nicht ausprobieren
     laesst, welche Konten es gibt."""
+    if payload.phone:
+        # Lockfeld (Honeypot) ausgefuellt: gleiche Antwort, aber keine Mail
+        logger.warning("Passwort vergessen: unsichtbares Feld ausgefüllt (vermutlich Bot) - ignoriert")
+        return {"detail": FORGOT_PASSWORD_RESPONSE}
+
     user = (
         db.query(User)
         .filter(

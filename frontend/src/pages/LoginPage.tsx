@@ -1,7 +1,8 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { apiErrorMessage } from "../api/client";
 import { useAuth } from "../api/AuthContext";
+import { HoneypotField } from "../components/HoneypotField";
 import { Icon } from "../components/Icon";
 import { Notice } from "../components/Modal";
 
@@ -11,6 +12,7 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const honeypot = useRef<HTMLInputElement>(null);
 
   if (isAuthenticated) return <Navigate to="/" replace />;
 
@@ -19,7 +21,7 @@ export function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      await login(username.trim(), password);
+      await login(username.trim(), password, honeypot.current?.value ?? "");
     } catch (err) {
       // Unterscheidet "falsches Passwort" von "Backend nicht erreichbar"
       setError(apiErrorMessage(err, "Anmeldung fehlgeschlagen."));
@@ -64,6 +66,7 @@ export function LoginPage() {
             required
           />
         </label>
+        <HoneypotField ref={honeypot} name="email" label="E-Mail-Adresse" />
         {error && <Notice kind="error">{error}</Notice>}
         <button type="submit" className="btn btn-primary" disabled={busy}>
           {busy ? "Anmelden…" : "Anmelden"}
