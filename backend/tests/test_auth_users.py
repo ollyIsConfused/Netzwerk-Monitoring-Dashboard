@@ -3,7 +3,7 @@ from datetime import datetime
 from shared.database import SessionLocal
 from shared.models import AlertEvent, AlertLevel, Device, DeviceType
 
-from .conftest import ADMIN_PASSWORD, login
+from .conftest import ADMIN_PASSWORD, activate, login
 
 
 def test_change_password(client, admin_headers):
@@ -33,9 +33,14 @@ def test_change_password(client, admin_headers):
         json={"current_password": ADMIN_PASSWORD, "new_password": "neues-pass-1"},
         headers=admin_headers,
     )
-    assert ok.status_code == 204
+    assert ok.status_code == 200
     assert client.post("/auth/login", data={"username": "admin", "password": ADMIN_PASSWORD}).status_code == 401
     login(client, "admin", "neues-pass-1")
+
+    # Andere Sitzungen sind abgemeldet, die eigene bekommt ein neues Token
+    assert client.get("/auth/me", headers=admin_headers).status_code == 401
+    new_headers = {"Authorization": f"Bearer {ok.json()['access_token']}"}
+    assert client.get("/auth/me", headers=new_headers).status_code == 200
 
 
 def test_create_user_and_roles(client, admin_headers):
@@ -61,7 +66,7 @@ def test_create_user_and_roles(client, admin_headers):
     )
     assert bad_email.status_code == 422
 
-    viewer_headers = login(client, "anna", "anna-pass-1")
+    viewer_headers = activate(client, "anna", "anna-pass-1", "anna-eigen-1")
     assert client.get("/users", headers=viewer_headers).status_code == 403
     assert client.get("/auth/me", headers=viewer_headers).json()["username"] == "anna"
 
@@ -81,7 +86,7 @@ def test_last_admin_is_protected(client, admin_headers):
     # Mit einem zweiten Admin darf der erste herabgestuft werden
     assert client.patch(f"/users/{admin_id}", json={"role": "operator"}, headers=admin_headers).status_code == 200
 
-    second_headers = login(client, "zweit", "zweit-pass-1")
+    second_headers = activate(client, "zweit", "zweit-pass-1", "zweit-eigen-1")
     assert client.patch(f"/users/{second['id']}", json={"role": "viewer"}, headers=second_headers).status_code == 400
 
 

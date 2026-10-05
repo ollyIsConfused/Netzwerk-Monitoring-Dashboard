@@ -5,8 +5,18 @@
 # SKIP_DB=1 ./dev.sh, wenn die Datenbank nicht ueber Docker laeuft.
 set -euo pipefail
 cd "$(dirname "$0")"
+# shellcheck source=deploy/env-tools.sh
+. deploy/env-tools.sh
 
-[ -f .env ] || { echo "Fehlt: .env – zuerst 'cp .env.example .env' und Werte eintragen."; exit 1; }
+if [ ! -f .env ]; then
+  # Erster Start: .env mit Zufallswerten fuer die lokale Docker-Datenbank anlegen
+  cp .env.example .env
+  chmod 600 .env
+  env_set .env JWT_SECRET "$(random_secret)"
+  env_set .env COLLECTOR_API_TOKEN "$(random_secret)"
+  env_set .env POSTGRES_PASSWORD "$(random_secret)"
+  echo ".env angelegt (Zufallswerte, lokale Datenbank in Docker)."
+fi
 [ -x backend/.venv/bin/uvicorn ] || {
   echo "Fehlt: backend/.venv – zuerst:"
   echo "  cd backend && python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt"
@@ -20,6 +30,31 @@ fi
 
 set -a; source .env; set +a
 export PYTHONPATH="$PWD"
+if [ -z "${DATABASE_URL:-}" ]; then
+  # Ohne eigene DATABASE_URL: der Docker-Container "db" mit den POSTGRES_*-Werten aus .env
+  DATABASE_URL="postgresql+psycopg2://$(url_encode "${POSTGRES_USER:-monitoring}"):$(url_encode "${POSTGRES_PASSWORD:-monitoring}")@localhost:5432/${POSTGRES_DB:-monitoring}"
+  export DATABASE_URL
+fi
+
+if ! (cd backend && .venv/bin/python - <<'PY'
+import sys
+from sqlalchemy import text
+from shared.database import engine
+try:
+    with engine.connect() as conn:
+        conn.execute(text("select 1"))
+except Exception as exc:  # Meldung ohne Passwort ausgeben
+    print("Datenbank: " + str(getattr(exc, "orig", exc)).strip().splitlines()[0])
+    sys.exit(1)
+PY
+); then
+  echo
+  echo "Keine Verbindung zur Datenbank."
+  echo "Steht oben 'password authentication failed': Der Docker-Container wurde mit einem"
+  echo "anderen POSTGRES_PASSWORD angelegt, als jetzt in .env steht. Lokale Testdaten"
+  echo "verwerfen und neu anlegen:  docker compose down -v  und dann  ./dev.sh"
+  exit 1
+fi
 
 # Legt Admin-Benutzer und Beispiel-VLANs nur an, wenn sie noch fehlen
 (cd backend && .venv/bin/python -m app.seed)
