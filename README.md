@@ -63,6 +63,28 @@ docker compose exec backend python -m app.seed
 - Frontend: http://localhost:5173 (Login mit `admin` / dem in `.env` gesetzten `SEED_ADMIN_PASSWORD`)
 - Backend-API/Docs: http://localhost:8000/docs
 
+### Alternative: Backend und Frontend direkt starten, nur die Datenbank in Docker
+
+Praktisch zum Entwickeln, weil Code-Änderungen sofort neu geladen werden.
+Einmalig:
+
+```bash
+cp .env.example .env
+# zusätzlich in .env: DATABASE_URL=postgresql+psycopg2://monitoring:<POSTGRES_PASSWORD>@localhost:5432/monitoring
+cd backend && python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
+cd frontend && npm install && cd ..
+```
+
+Starten (Datenbank, Admin-Benutzer, Backend und Frontend in einem Terminal,
+Strg+C beendet Backend und Frontend):
+
+```bash
+./dev.sh
+```
+
+Der Seed legt den Admin nur beim ersten Mal an. Ein später in `.env`
+geändertes `SEED_ADMIN_PASSWORD` ändert das bestehende Passwort nicht.
+
 Danach im Dashboard (oder direkt über die API) die echten Geräte anlegen:
 IP-Adresse, VLAN-Zuordnung, für Switch/Router die SNMP-Community und zu
 überwachende Interface-Indizes, für NAS/Webserver optional ein Agent-Token für
