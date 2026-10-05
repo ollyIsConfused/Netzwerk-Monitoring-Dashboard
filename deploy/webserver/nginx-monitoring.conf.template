@@ -1,0 +1,33 @@
+# nginx-Site fuer das Dashboard auf dem Webserver (wird von install.sh befuellt).
+# Liefert das gebaute Frontend aus und leitet /api und /ws an das Backend weiter,
+# das selbst nur auf 127.0.0.1:8000 lauscht. Nach aussen ist damit nur dieser
+# eine Port sichtbar - fuer Browser (per VPN) und den Collector auf dem Router-Pi.
+# Bewusst nur IPv4: im Heimnetz laeuft alles ueber IPv4, und ohne IPv6-Listener ist
+# das Dashboard nicht ueber eventuell durchgereichte globale IPv6-Adressen erreichbar.
+server {
+    listen __PORT__;
+    server_name _;
+
+    root __ROOT__/frontend/dist;
+    index index.html;
+
+    # React-Router: unbekannte Pfade liefern die App aus
+    location / {
+        try_files $uri /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /ws/ {
+        proxy_pass http://127.0.0.1:8000/ws/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 1h;
+    }
+}
