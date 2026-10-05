@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from shared.database import init_db
 
 from .notifications import dispatch_alert_emails_loop
-from .routers import alerts, auth, collector, devices, metrics, vlans, ws
+from .routers import alerts, auth, collector, devices, metrics, users, vlans, ws
 
 app = FastAPI(title="Netzwerk-Monitoring-Dashboard API")
 
@@ -20,6 +20,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(vlans.router)
 app.include_router(devices.router)
 app.include_router(metrics.router)
