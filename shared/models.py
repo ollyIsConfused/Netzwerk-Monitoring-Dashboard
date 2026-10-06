@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Table,
     Text,
     false,
 )
@@ -82,6 +83,17 @@ class Vlan(Base):
     devices = relationship("Device", back_populates="vlan")
 
 
+# Trunk-Port: welche VLANs ein Geraet getaggt fuehrt (das native VLAN steht in devices.vlan_id)
+device_tagged_vlans = Table(
+    "device_tagged_vlans",
+    Base.metadata,
+    Column("device_id", Integer, ForeignKey("devices.id", ondelete="CASCADE"), primary_key=True),
+    Column("vlan_id", Integer, ForeignKey("vlans.id", ondelete="CASCADE"), primary_key=True),
+)
+
+PORT_MODES = ("access", "trunk")
+
+
 class Device(Base):
     __tablename__ = "devices"
 
@@ -90,6 +102,9 @@ class Device(Base):
     ip_address = Column(String(64), nullable=False)
     device_type = Column(Enum(DeviceType), nullable=False, default=DeviceType.other)
     vlan_id = Column(Integer, ForeignKey("vlans.id"), nullable=True)
+    # Anschluss am Switch: "access" = genau ein VLAN (vlan_id). "trunk" = mehrere VLANs getaggt
+    # (tagged_vlans), vlan_id ist dann das native, ungetaggte VLAN
+    port_mode = Column(String(8), default="access", nullable=False, server_default="access")
     is_active = Column(Boolean, default=True, nullable=False)
 
     # SNMP configuration (optional - only relevant for switch/router)
@@ -106,7 +121,12 @@ class Device(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     vlan = relationship("Vlan", back_populates="devices")
+    tagged_vlans = relationship("Vlan", secondary=device_tagged_vlans, order_by="Vlan.tag")
     thresholds = relationship("ThresholdRule", back_populates="device", cascade="all, delete-orphan")
+
+    @property
+    def tagged_vlan_ids(self) -> list[int]:
+        return [vlan.id for vlan in self.tagged_vlans]
 
 
 class ThresholdRule(Base):

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from shared.models import Device, User, UserRole, Vlan
+from shared.models import Device, User, UserRole, Vlan, device_tagged_vlans
 
 from ..deps import get_db
 from ..schemas import VlanCreate, VlanOut, VlanUpdate
@@ -57,7 +57,8 @@ def delete_vlan(vlan_id: int, db: Session = Depends(get_db)):
     vlan = db.query(Vlan).filter(Vlan.id == vlan_id).first()
     if vlan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="VLAN nicht gefunden")
-    # Geraete bleiben erhalten und werden nur keinem VLAN mehr zugeordnet
+    # Geraete bleiben erhalten und werden nur keinem VLAN mehr zugeordnet (bzw. verlieren es als getaggtes VLAN)
     db.query(Device).filter(Device.vlan_id == vlan.id).update({Device.vlan_id: None}, synchronize_session=False)
+    db.execute(device_tagged_vlans.delete().where(device_tagged_vlans.c.vlan_id == vlan.id))
     db.delete(vlan)
     db.commit()

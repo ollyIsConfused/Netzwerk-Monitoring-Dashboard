@@ -485,6 +485,15 @@ td.actions {
   color: var(--text-secondary);
 }
 
+/* Kleines Etikett vor bzw. hinter Text in einer Tabellenzelle, z. B. "Trunk" */
+.badge-inline {
+  margin-right: 6px;
+}
+
+.badge-inline-after {
+  margin-left: 8px;
+}
+
 .badge-role-admin {
   background: var(--accent-soft);
   border-color: transparent;
@@ -647,6 +656,14 @@ textarea.input {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Mehrfachauswahl nebeneinander, z. B. getaggte VLANs eines Trunk-Ports */
+.check-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 4px 0;
 }
 
 .checkbox {
