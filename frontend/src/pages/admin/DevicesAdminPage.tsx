@@ -22,6 +22,8 @@ interface DeviceForm {
   /** Access: das VLAN, Trunk: das native (ungetaggte) VLAN */
   vlan_id: string;
   tagged_vlan_ids: number[];
+  /** Adresse des Geraets je getaggtem VLAN (optional), z. B. das Gateway beim Router */
+  vlan_addresses: Record<number, string>;
   is_active: boolean;
   snmp_enabled: boolean;
   snmp_community: string;
@@ -39,6 +41,7 @@ const EMPTY_FORM: DeviceForm = {
   port_mode: "access",
   vlan_id: "",
   tagged_vlan_ids: [],
+  vlan_addresses: {},
   is_active: true,
   snmp_enabled: false,
   snmp_community: "",
@@ -84,6 +87,7 @@ function DeviceDialog({
           port_mode: data.port_mode,
           vlan_id: data.vlan_id === null ? "" : String(data.vlan_id),
           tagged_vlan_ids: data.tagged_vlan_ids,
+          vlan_addresses: Object.fromEntries(data.vlan_addresses.map((entry) => [entry.vlan_id, entry.ip_address])),
           is_active: data.is_active,
           snmp_enabled: data.snmp_enabled,
           snmp_community: data.snmp_community ?? "",
@@ -120,7 +124,12 @@ function DeviceDialog({
     }));
   }
 
+  function setVlanAddress(vlanId: number, value: string) {
+    setForm((prev) => ({ ...prev, vlan_addresses: { ...prev.vlan_addresses, [vlanId]: value } }));
+  }
+
   const isTrunk = form.port_mode === "trunk";
+  const taggedVlans = vlans.filter((vlan) => form.tagged_vlan_ids.includes(vlan.id));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -145,6 +154,11 @@ function DeviceDialog({
       port_mode: form.port_mode,
       vlan_id: form.vlan_id === "" ? null : Number(form.vlan_id),
       tagged_vlan_ids: isTrunk ? form.tagged_vlan_ids : [],
+      vlan_addresses: isTrunk
+        ? form.tagged_vlan_ids
+            .map((id) => ({ vlan_id: id, ip_address: (form.vlan_addresses[id] ?? "").trim() }))
+            .filter((entry) => entry.ip_address !== "")
+        : [],
       is_active: form.is_active,
       snmp_enabled: form.snmp_enabled,
       snmp_community: form.snmp_community.trim() || null,
@@ -177,7 +191,7 @@ function DeviceDialog({
               <input className="input" value={form.name} onChange={(e) => set("name", e.target.value)} required />
             </label>
             <label className="field">
-              <span>IP-Adresse oder Hostname</span>
+              <span>{isTrunk ? "Haupt-IP (Verwaltung) oder Hostname" : "IP-Adresse oder Hostname"}</span>
               <input
                 className="input mono"
                 value={form.ip_address}
@@ -248,6 +262,29 @@ function DeviceDialog({
                   </div>
                 )}
                 <small>Zum Beispiel der Router-Pi am Trunk: nativ VLAN 1, getaggt 20, 30 und 50.</small>
+                {taggedVlans.length > 0 && (
+                  <div className="vlan-address-list">
+                    <span className="vlan-address-title">Adresse des Geräts in den getaggten VLANs (optional)</span>
+                    {taggedVlans.map((vlan) => (
+                      <label key={vlan.id} className="vlan-address-row">
+                        <span>
+                          {vlan.name} (VLAN {vlan.tag})
+                        </span>
+                        <input
+                          className="input mono"
+                          value={form.vlan_addresses[vlan.id] ?? ""}
+                          onChange={(e) => setVlanAddress(vlan.id, e.target.value)}
+                          placeholder={vlan.tag <= 255 ? `z. B. 192.168.${vlan.tag}.1` : "IP-Adresse"}
+                          aria-label={`Adresse in VLAN ${vlan.tag}`}
+                        />
+                      </label>
+                    ))}
+                    <small>
+                      Beim Router-Pi seine Gateway-Adresse im jeweiligen VLAN. Angepingt und per SNMP abgefragt wird
+                      weiter die Haupt-IP oben.
+                    </small>
+                  </div>
+                )}
               </div>
             )}
             <label className="checkbox span-2">
@@ -337,6 +374,11 @@ function DeviceDialog({
                     Generieren
                   </button>
                 </div>
+                <small>
+                  Auf dem Gerät einrichten mit <code>sudo ./deploy/agent/install-agent.sh</code> - das Skript fragt
+                  nach der Backend-Adresse und diesem Token und schickt dann jede Minute CPU, Arbeitsspeicher,
+                  Festplatte und Temperatur.
+                </small>
               </label>
             )}
           </fieldset>
@@ -420,7 +462,16 @@ export function DevicesAdminPage() {
                         </span>
                       )}
                     </td>
-                    <td className="mono">{device.ip_address}</td>
+                    <td>
+                      <div className="cell-stack">
+                        <span className="mono">{device.ip_address}</span>
+                        {device.vlan_addresses.length > 0 && (
+                          <span className="muted mono small-text">
+                            {device.vlan_addresses.map((entry) => entry.ip_address).join(", ")}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td>{DEVICE_TYPE_LABELS[device.device_type]}</td>
                     <td>
                       {device.port_mode === "trunk" && <span className="badge badge-plain badge-inline">Trunk</span>}

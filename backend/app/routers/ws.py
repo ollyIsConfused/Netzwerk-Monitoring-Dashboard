@@ -1,13 +1,15 @@
 import asyncio
 import json
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from shared.database import SessionLocal
-from shared.models import Device, MetricSample, MetricStatus
+from shared.models import Device
 
 from ..config import STATUS_BROADCAST_INTERVAL_SECONDS
+from ..device_status import device_state
 
 router = APIRouter(tags=["websocket"])
 logger = logging.getLogger(__name__)
@@ -19,17 +21,12 @@ def _current_status_snapshot() -> list[dict]:
     db = SessionLocal()
     try:
         devices = db.query(Device).filter(Device.is_active.is_(True)).all()
-        snapshot = []
-        for device in devices:
-            latest = (
-                db.query(MetricSample)
-                .filter(MetricSample.device_id == device.id)
-                .order_by(MetricSample.timestamp.desc())
-                .first()
-            )
-            status = latest.status.value if latest else MetricStatus.unknown.value
-            snapshot.append({"device_id": device.id, "name": device.name, "status": status})
-        return snapshot
+        now = datetime.utcnow()
+        # Derselbe Gesamtstatus wie GET /devices/status (inkl. "veraltet" -> unknown)
+        return [
+            {"device_id": device.id, "name": device.name, "status": device_state(db, device, now).overall_status.value}
+            for device in devices
+        ]
     finally:
         db.close()
 

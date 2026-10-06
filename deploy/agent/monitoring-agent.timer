@@ -1,0 +1,12 @@
+# Wird von deploy/agent/install-agent.sh nach /etc/systemd/system kopiert (Intervall eingesetzt)
+[Unit]
+Description=Netzwerk-Monitoring Agent alle __INTERVAL__ Sekunden
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=__INTERVAL__
+AccuracySec=5
+Unit=monitoring-agent.service
+
+[Install]
+WantedBy=timers.target

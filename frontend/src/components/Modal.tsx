@@ -52,10 +52,17 @@ export function Modal({
   );
 }
 
-export function Notice({ kind, children }: { kind: "error" | "success" | "info"; children: ReactNode }) {
+export function Notice({
+  kind,
+  children,
+}: {
+  kind: "error" | "warning" | "success" | "info";
+  children: ReactNode;
+}) {
+  const icon = kind === "error" || kind === "warning" ? "alert" : kind === "success" ? "check" : "help";
   return (
     <div className={`notice notice-${kind}`} role={kind === "error" ? "alert" : "status"}>
-      <Icon name={kind === "error" ? "alert" : kind === "success" ? "check" : "help"} size={16} />
+      <Icon name={icon} size={16} />
       <div>{children}</div>
     </div>
   );

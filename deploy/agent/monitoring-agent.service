@@ -1,0 +1,17 @@
+# Wird von deploy/agent/install-agent.sh nach /etc/systemd/system kopiert (Pfade eingesetzt)
+[Unit]
+Description=Netzwerk-Monitoring Agent (CPU, Arbeitsspeicher, Festplatte, Temperatur)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=__ENV_FILE__
+ExecStart=__TARGET__/monitoring-agent.sh
+# Eigener, kurzlebiger Benutzer ohne Rechte; das Dateisystem ist nur lesbar
+DynamicUser=yes
+StateDirectory=monitoring-agent
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes

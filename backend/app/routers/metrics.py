@@ -45,7 +45,9 @@ def push_agent_metrics(payload: AgentMetricPush, db: Session = Depends(get_db)):
     if device is None:
         raise HTTPException(status_code=401, detail="Unbekanntes oder ungültiges Agent-Token")
 
+    device.agent_last_push_at = datetime.utcnow()
     for metric_name, value in payload.metrics.items():
         record_metric(db, device, metric_name, value)
+    db.commit()
 
     return {"stored": len(payload.metrics)}
