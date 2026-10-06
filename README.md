@@ -46,7 +46,8 @@ einem bestehenden Webserver mit pm2) stehen in
 - **`frontend/`** – React/Vite-Dashboard (Hell-/Dunkelmodus): VLAN-Übersicht mit
   Live-Status (WebSocket) und Kennzahlen, Geräte-Detailseite mit Zeitreihen-Diagrammen
   inkl. Schwellenwert-Linien, Alarmliste mit Quittierfunktion. Für Admins:
-  Verwaltung von Geräten (inkl. SNMP/Agent), VLANs, Schwellenwerten und Benutzern;
+  Verwaltung von Geräten (inkl. SNMP/Agent und Trunk-Ports mit nativem und mehreren
+  getaggten VLANs, z. B. ein Router „on a stick“), VLANs, Schwellenwerten und Benutzern;
   für alle: Passwort ändern unter „Mein Konto“.
 
 ### Rollen

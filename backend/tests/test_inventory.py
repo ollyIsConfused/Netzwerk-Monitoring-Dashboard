@@ -141,3 +141,56 @@ def test_alert_lifecycle_via_collector(client, admin_headers):
     history = client.get("/alerts", headers=admin_headers).json()
     assert [a["level"] for a in history] == ["recovered", "critical"]
     assert history[1]["resolved_at"] is not None
+
+
+def test_trunk_port_with_native_and_tagged_vlans(client, admin_headers):
+    vlans = {
+        tag: client.post("/vlans", json={"name": f"VLAN {tag}", "tag": tag}, headers=admin_headers).json()["id"]
+        for tag in (1, 20, 30, 50)
+    }
+    router = {"name": "Router-Pi", "ip_address": "192.168.178.66", "device_type": "router"}
+
+    # Router on a stick: nativ VLAN 1, getaggt 20/30/50
+    created = client.post(
+        "/devices",
+        json={**router, "port_mode": "trunk", "vlan_id": vlans[1], "tagged_vlan_ids": [vlans[50], vlans[20], vlans[30]]},
+        headers=admin_headers,
+    )
+    assert created.status_code == 201, created.text
+    device = created.json()
+    assert device["port_mode"] == "trunk" and device["vlan_id"] == vlans[1]
+    assert device["tagged_vlan_ids"] == [vlans[20], vlans[30], vlans[50]]  # nach Tag sortiert
+
+    # Ungueltige Trunk-Angaben
+    def create(**extra):
+        return client.post("/devices", json={**router, "port_mode": "trunk", **extra}, headers=admin_headers)
+
+    assert create(tagged_vlan_ids=[]).status_code == 400
+    assert create(vlan_id=vlans[20], tagged_vlan_ids=[vlans[20]]).status_code == 400
+    assert create(tagged_vlan_ids=[9999]).status_code == 400
+
+    # In jedem seiner VLANs auffindbar, auch im Status der Uebersicht
+    for tag in (1, 20, 30, 50):
+        names = [d["name"] for d in client.get("/devices", params={"vlan_id": vlans[tag]}, headers=admin_headers).json()]
+        assert names == ["Router-Pi"]
+    status = client.get("/devices/status", headers=admin_headers).json()
+    assert status[0]["device"]["tagged_vlan_ids"] == [vlans[20], vlans[30], vlans[50]]
+
+    # Geloeschtes VLAN verschwindet aus dem Trunk, das Geraet bleibt
+    assert client.delete(f"/vlans/{vlans[30]}", headers=admin_headers).status_code == 204
+    assert client.get(f"/devices/{device['id']}", headers=admin_headers).json()["tagged_vlan_ids"] == [
+        vlans[20], vlans[50]
+    ]
+
+    # Wechsel auf Access-Port entfernt die getaggten VLANs, zurueck auf Trunk braucht wieder welche
+    access = client.patch(f"/devices/{device['id']}", json={"port_mode": "access"}, headers=admin_headers).json()
+    assert access["port_mode"] == "access" and access["tagged_vlan_ids"] == []
+    assert client.patch(f"/devices/{device['id']}", json={"port_mode": "trunk"}, headers=admin_headers).status_code == 400
+    trunk = client.patch(
+        f"/devices/{device['id']}", json={"port_mode": "trunk", "tagged_vlan_ids": [vlans[20]]}, headers=admin_headers
+    ).json()
+    assert trunk["tagged_vlan_ids"] == [vlans[20]]
+
+    # Loeschen raeumt die Zuordnungen mit auf (Fremdschluessel)
+    assert client.delete(f"/devices/{device['id']}", headers=admin_headers).status_code == 204
+    assert client.delete(f"/vlans/{vlans[20]}", headers=admin_headers).status_code == 204

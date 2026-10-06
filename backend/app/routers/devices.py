@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, selectinload
 
 from shared.models import AlertEvent, Device, MetricSample, MetricStatus, ThresholdRule, User, UserRole, Vlan
 
@@ -22,7 +23,8 @@ require_admin = require_roles(UserRole.admin)
 
 # Spalten ohne NULL in der Datenbank: ein explizites null im PATCH wird ignoriert
 _NON_NULLABLE_DEVICE_FIELDS = {
-    "name", "ip_address", "device_type", "is_active", "snmp_enabled", "snmp_version", "snmp_port", "agent_enabled",
+    "name", "ip_address", "device_type", "port_mode", "is_active", "snmp_enabled", "snmp_version", "snmp_port",
+    "agent_enabled",
 }
 
 
@@ -37,6 +39,26 @@ def _ensure_vlan_exists(db: Session, vlan_id: int | None) -> None:
     if vlan_id is not None and db.query(Vlan).filter(Vlan.id == vlan_id).first() is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dieses VLAN existiert nicht")
 
+
+def _tagged_vlans_for(db: Session, port_mode: str, native_vlan_id: int | None, vlan_ids: list[int]) -> list[Vlan]:
+    """Getaggte VLANs eines Trunk-Ports pruefen und laden. Ein Access-Port hat keine."""
+    if port_mode != "trunk":
+        return []
+    vlan_ids = list(dict.fromkeys(vlan_ids))
+    if not vlan_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Ein Trunk-Port braucht mindestens ein getaggtes VLAN"
+        )
+    if native_vlan_id in vlan_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Das native VLAN ist ungetaggt und kann nicht zusätzlich getaggt sein",
+        )
+    vlans = db.query(Vlan).filter(Vlan.id.in_(vlan_ids)).all()
+    if len(vlans) != len(vlan_ids):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mindestens ein getaggtes VLAN existiert nicht")
+    return vlans
+
 _STATUS_PRIORITY = {
     MetricStatus.critical: 3,
     MetricStatus.warning: 2,
@@ -47,16 +69,17 @@ _STATUS_PRIORITY = {
 
 @router.get("", response_model=list[DeviceOut])
 def list_devices(vlan_id: int | None = None, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    query = db.query(Device)
+    query = db.query(Device).options(selectinload(Device.tagged_vlans))
     if vlan_id is not None:
-        query = query.filter(Device.vlan_id == vlan_id)
+        # Auch Trunk-Geraete, die das VLAN getaggt fuehren
+        query = query.filter(or_(Device.vlan_id == vlan_id, Device.tagged_vlans.any(Vlan.id == vlan_id)))
     return query.order_by(Device.name).all()
 
 
 @router.get("/status", response_model=list[DeviceStatusOut])
 def list_device_status(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     """Latest known value per metric, per device, plus an aggregated overall status."""
-    devices = db.query(Device).filter(Device.is_active.is_(True)).all()
+    devices = db.query(Device).options(selectinload(Device.tagged_vlans)).filter(Device.is_active.is_(True)).all()
     results: list[DeviceStatusOut] = []
 
     for device in devices:
@@ -97,7 +120,8 @@ def list_device_status(db: Session = Depends(get_db), _: User = Depends(get_curr
 @router.post("", response_model=DeviceOut, status_code=201, dependencies=[Depends(require_admin)])
 def create_device(payload: DeviceCreate, db: Session = Depends(get_db)):
     _ensure_vlan_exists(db, payload.vlan_id)
-    device = Device(**payload.model_dump())
+    device = Device(**payload.model_dump(exclude={"tagged_vlan_ids"}))
+    device.tagged_vlans = _tagged_vlans_for(db, payload.port_mode, payload.vlan_id, payload.tagged_vlan_ids)
     db.add(device)
     db.commit()
     db.refresh(device)
@@ -119,12 +143,17 @@ def get_device_config(device_id: int, db: Session = Depends(get_db)):
 def update_device(device_id: int, payload: DeviceUpdate, db: Session = Depends(get_db)):
     device = _get_device_or_404(db, device_id)
     changes = payload.model_dump(exclude_unset=True)
+    tagged_vlan_ids = changes.pop("tagged_vlan_ids", None)
     if "vlan_id" in changes:
         _ensure_vlan_exists(db, changes["vlan_id"])
     for field, value in changes.items():
         if value is None and field in _NON_NULLABLE_DEVICE_FIELDS:
             continue
         setattr(device, field, value)
+    # Anschluss, natives VLAN oder getaggte VLANs geaendert: Zuordnung neu pruefen
+    if tagged_vlan_ids is not None or "port_mode" in changes or "vlan_id" in changes:
+        ids = tagged_vlan_ids if tagged_vlan_ids is not None else device.tagged_vlan_ids
+        device.tagged_vlans = _tagged_vlans_for(db, device.port_mode, device.vlan_id, ids)
     db.commit()
     db.refresh(device)
     return device

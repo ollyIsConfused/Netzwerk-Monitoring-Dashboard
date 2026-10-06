@@ -4,6 +4,7 @@ import {
   AlertEvent,
   api,
   apiErrorMessage,
+  describeDeviceVlans,
   Device,
   DEVICE_TYPE_LABELS,
   formatDateTime,
@@ -106,7 +107,6 @@ export function DeviceDetailPage() {
     return [...names].filter(isChartableMetric).sort((a, b) => metricOrder(a) - metricOrder(b) || a.localeCompare(b));
   }, [samplesByMetric]);
 
-  const vlan = vlans.find((v) => v.id === device?.vlan_id);
 
   if (error && !device) {
     return (
@@ -137,7 +137,8 @@ export function DeviceDetailPage() {
                 Typ <b>{DEVICE_TYPE_LABELS[device.device_type]}</b>
               </span>
               <span>
-                VLAN <b>{vlan ? `${vlan.name} (${vlan.tag})` : "keins"}</b>
+                {device.port_mode === "trunk" ? "Trunk" : "VLAN"}{" "}
+                <b>{describeDeviceVlans(device, vlans).replace(/^–$/, "keins")}</b>
               </span>
               {!device.is_active && <span className="badge badge-plain">pausiert</span>}
             </div>

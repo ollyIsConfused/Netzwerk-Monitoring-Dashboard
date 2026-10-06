@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api, apiErrorMessage, Device, Vlan } from "../../api/client";
+import { api, apiErrorMessage, Device, deviceVlanIds, Vlan } from "../../api/client";
 import { Icon } from "../../components/Icon";
 import { ConfirmDialog, Modal, Notice } from "../../components/Modal";
 
@@ -90,7 +90,7 @@ export function VlansAdminPage() {
     load();
   }, [load]);
 
-  const deviceCount = (vlanId: number) => devices.filter((d) => d.vlan_id === vlanId).length;
+  const deviceCount = (vlanId: number) => devices.filter((d) => deviceVlanIds(d).includes(vlanId)).length;
 
   return (
     <div className="page">
@@ -165,7 +165,7 @@ export function VlansAdminPage() {
             <>
               VLAN <b>{deleting.name}</b> löschen?
               {deviceCount(deleting.id) > 0 &&
-                ` Die ${deviceCount(deleting.id)} Geräte darin bleiben erhalten und stehen danach unter „Ohne VLAN“.`}
+                ` Die ${deviceCount(deleting.id)} Geräte darin bleiben erhalten. Wer nur in diesem VLAN war, steht danach unter „Ohne VLAN“, Trunk-Ports verlieren nur dieses VLAN.`}
             </>
           }
           onConfirm={async () => {
