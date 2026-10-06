@@ -1,7 +1,7 @@
 import ipaddress
 import re
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
@@ -35,6 +35,7 @@ def _validate_email(value: str) -> str:
 
 
 HostStr = Annotated[str, AfterValidator(_validate_host)]
+PortMode = Literal["access", "trunk"]
 EmailStr = Annotated[str, AfterValidator(_validate_email)]
 
 
@@ -145,7 +146,11 @@ class DeviceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     ip_address: HostStr
     device_type: DeviceType
+    # access: vlan_id ist das VLAN des Geraets. trunk: vlan_id ist das native (ungetaggte) VLAN,
+    # tagged_vlan_ids die getaggten VLANs
+    port_mode: PortMode = "access"
     vlan_id: Optional[int] = None
+    tagged_vlan_ids: list[int] = Field(default_factory=list)
     is_active: bool = True
     snmp_enabled: bool = False
     snmp_community: Optional[str] = None
@@ -160,7 +165,9 @@ class DeviceUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     ip_address: Optional[HostStr] = None
     device_type: Optional[DeviceType] = None
+    port_mode: Optional[PortMode] = None
     vlan_id: Optional[int] = None
+    tagged_vlan_ids: Optional[list[int]] = None
     is_active: Optional[bool] = None
     snmp_enabled: Optional[bool] = None
     snmp_community: Optional[str] = None
@@ -177,7 +184,9 @@ class DeviceOut(BaseModel):
     name: str
     ip_address: str
     device_type: DeviceType
+    port_mode: PortMode
     vlan_id: Optional[int] = None
+    tagged_vlan_ids: list[int] = []
     is_active: bool
     snmp_enabled: bool
     agent_enabled: bool

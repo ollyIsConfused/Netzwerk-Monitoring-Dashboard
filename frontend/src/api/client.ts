@@ -146,15 +146,43 @@ export interface Vlan {
   description: string | null;
 }
 
+/** access = Geraet haengt in genau einem VLAN; trunk = Port fuehrt mehrere VLANs getaggt */
+export type PortMode = "access" | "trunk";
+
 export interface Device {
   id: number;
   name: string;
   ip_address: string;
   device_type: DeviceType;
+  port_mode: PortMode;
+  /** Access: das VLAN des Geraets. Trunk: das native (ungetaggte) VLAN */
   vlan_id: number | null;
+  tagged_vlan_ids: number[];
   is_active: boolean;
   snmp_enabled: boolean;
   agent_enabled: boolean;
+}
+
+/** Alle VLANs, in denen ein Geraet vorkommt: das (native) VLAN und bei Trunks die getaggten. */
+export function deviceVlanIds(device: Device): number[] {
+  const ids = device.vlan_id === null ? [] : [device.vlan_id];
+  return device.port_mode === "trunk" ? [...ids, ...device.tagged_vlan_ids] : ids;
+}
+
+/** Kurzbeschreibung fuer Tabellen, z. B. "Webserver (30)" oder "nativ 1 · getaggt 20, 30, 50". */
+export function describeDeviceVlans(device: Device, vlans: Vlan[]): string {
+  const byId = new Map(vlans.map((vlan) => [vlan.id, vlan]));
+  if (device.port_mode !== "trunk") {
+    const vlan = device.vlan_id === null ? undefined : byId.get(device.vlan_id);
+    return vlan ? `${vlan.name} (${vlan.tag})` : "–";
+  }
+  const native = device.vlan_id === null ? undefined : byId.get(device.vlan_id);
+  const tagged = device.tagged_vlan_ids
+    .map((id) => byId.get(id)?.tag)
+    .filter((tag): tag is number => tag !== undefined);
+  return [native ? `nativ ${native.tag}` : null, tagged.length ? `getaggt ${tagged.join(", ")}` : null]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export interface DeviceConfig extends Device {
