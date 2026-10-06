@@ -60,8 +60,10 @@ done
 "$PYTHON" -c 'import ensurepip' 2>/dev/null || fail "venv-Modul fehlt: sudo apt install ${PYTHON}-venv"
 info "Python: $PYTHON ($("$PYTHON" --version 2>&1))"
 
-command -v npm >/dev/null 2>&1 || fail "Node.js/npm fehlt (mindestens Node 18)."
-node -e 'process.exit(parseInt(process.versions.node, 10) >= 18 ? 0 : 1)' || fail "Node.js ist zu alt ($(node --version)), mindestens 18 nötig."
+command -v npm >/dev/null 2>&1 || fail "Node.js/npm fehlt (20.19+ oder 22.12+)."
+# Mindestversion von Vite 8
+node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit((a === 20 && b >= 19) || (a === 22 && b >= 12) || a > 22 ? 0 : 1)' \
+  || fail "Node.js $(node --version) passt nicht - Vite 8 braucht 20.19+ oder 22.12+."
 command -v pm2 >/dev/null 2>&1 || fail "pm2 fehlt: sudo npm install -g pm2"
 command -v openssl >/dev/null 2>&1 || fail "openssl fehlt: sudo apt install openssl"
 info "Node: $(node --version), pm2: $(pm2 --version)"

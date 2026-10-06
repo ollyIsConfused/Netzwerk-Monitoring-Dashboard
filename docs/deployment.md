@@ -103,7 +103,7 @@ sudo -u postgres pg_dump monitoring | gzip > /mnt/storage/backups/monitoring-$(d
 
 ## 1. Webserver: Backend + Frontend
 
-Voraussetzungen (einmalig): `git`, Python 3.10–3.12 mit `venv`, Node.js ≥ 18,
+Voraussetzungen (einmalig): `git`, Python 3.10–3.12 mit `venv`, Node.js 20.19+ oder 22.12+,
 `pm2` (`sudo npm install -g pm2`) und nginx.
 
 ### 1.1 Repo holen und installieren

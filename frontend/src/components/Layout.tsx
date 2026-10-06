@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet } from "react-router";
 import { AlertEvent, api, onCountsChanged, ROLE_LABELS, User } from "../api/client";
 import { useAuth } from "../api/AuthContext";
 import { useTheme } from "../theme";
