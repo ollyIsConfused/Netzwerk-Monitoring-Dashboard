@@ -15,7 +15,6 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
-    Table,
     Text,
     false,
 )
@@ -83,13 +82,18 @@ class Vlan(Base):
     devices = relationship("Device", back_populates="vlan")
 
 
-# Trunk-Port: welche VLANs ein Geraet getaggt fuehrt (das native VLAN steht in devices.vlan_id)
-device_tagged_vlans = Table(
-    "device_tagged_vlans",
-    Base.metadata,
-    Column("device_id", Integer, ForeignKey("devices.id", ondelete="CASCADE"), primary_key=True),
-    Column("vlan_id", Integer, ForeignKey("vlans.id", ondelete="CASCADE"), primary_key=True),
-)
+class DeviceTaggedVlan(Base):
+    """Trunk-Port: ein VLAN, das ein Geraet getaggt fuehrt (das native VLAN steht in devices.vlan_id),
+    optional mit der Adresse des Geraets in diesem VLAN - beim Router z. B. das Gateway 192.168.20.1."""
+
+    __tablename__ = "device_tagged_vlans"
+
+    device_id = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), primary_key=True)
+    vlan_id = Column(Integer, ForeignKey("vlans.id", ondelete="CASCADE"), primary_key=True)
+    ip_address = Column(String(64), nullable=True)
+
+
+device_tagged_vlans = DeviceTaggedVlan.__table__
 
 PORT_MODES = ("access", "trunk")
 
@@ -117,16 +121,26 @@ class Device(Base):
     # Custom agent configuration (optional - for NAS/webserver push metrics)
     agent_enabled = Column(Boolean, default=False, nullable=False)
     agent_token = Column(String(128), nullable=True)
+    # Letzte Meldung des Agenten - bleibt sie aus, zeigt das Dashboard einen Hinweis
+    agent_last_push_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     vlan = relationship("Vlan", back_populates="devices")
-    tagged_vlans = relationship("Vlan", secondary=device_tagged_vlans, order_by="Vlan.tag")
+    # Schreiben ueber tagged_vlan_links, lesen (sortiert nach Tag) ueber tagged_vlans
+    tagged_vlan_links = relationship("DeviceTaggedVlan", cascade="all, delete-orphan")
+    tagged_vlans = relationship("Vlan", secondary=device_tagged_vlans, order_by="Vlan.tag", viewonly=True)
     thresholds = relationship("ThresholdRule", back_populates="device", cascade="all, delete-orphan")
 
     @property
     def tagged_vlan_ids(self) -> list[int]:
         return [vlan.id for vlan in self.tagged_vlans]
+
+    @property
+    def vlan_addresses(self) -> list[dict]:
+        """Adressen in den getaggten VLANs, sortiert nach Tag (nur VLANs mit eingetragener Adresse)."""
+        by_vlan = {link.vlan_id: link.ip_address for link in self.tagged_vlan_links if link.ip_address}
+        return [{"vlan_id": vlan.id, "ip_address": by_vlan[vlan.id]} for vlan in self.tagged_vlans if vlan.id in by_vlan]
 
 
 class ThresholdRule(Base):

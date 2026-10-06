@@ -28,6 +28,8 @@
   --danger-soft: rgba(208, 59, 59, 0.1);
   --success-text: #006300;
   --success-soft: rgba(12, 163, 12, 0.1);
+  --warning-soft: rgba(250, 178, 25, 0.16);
+  --warning-icon: #a86f00;
   --shadow: 0 1px 2px rgba(11, 11, 11, 0.06), 0 4px 16px rgba(11, 11, 11, 0.04);
   --shadow-lg: 0 12px 40px rgba(11, 11, 11, 0.18);
   --radius: 10px;
@@ -57,6 +59,8 @@
     --danger-soft: rgba(208, 59, 59, 0.18);
     --success-text: #4cc44c;
     --success-soft: rgba(12, 163, 12, 0.16);
+    --warning-soft: rgba(250, 178, 25, 0.14);
+    --warning-icon: #fab219;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
   }
@@ -83,6 +87,8 @@
   --danger-soft: rgba(208, 59, 59, 0.18);
   --success-text: #4cc44c;
   --success-soft: rgba(12, 163, 12, 0.16);
+  --warning-soft: rgba(250, 178, 25, 0.14);
+  --warning-icon: #fab219;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
 }
@@ -658,6 +664,39 @@ textarea.input {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* Adresse je getaggtem VLAN: Bezeichnung links, Eingabefeld rechts */
+.vlan-address-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.vlan-address-title {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.vlan-address-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.vlan-address-row > span {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+@media (max-width: 600px) {
+  .vlan-address-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 /* Mehrfachauswahl nebeneinander, z. B. getaggte VLANs eines Trunk-Ports */
 .check-grid {
   display: flex;
@@ -728,6 +767,35 @@ textarea.input {
 .notice-info {
   background: var(--accent-soft);
   color: var(--text);
+}
+
+.notice-warning {
+  background: var(--warning-soft);
+  color: var(--text);
+}
+
+.notice-warning > svg {
+  color: var(--warning-icon);
+}
+
+.notice p {
+  margin: 0;
+}
+
+.notice p + p {
+  margin-top: 4px;
+}
+
+code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+}
+
+.small-text {
+  font-size: 12px;
 }
 
 /* ---------- Dialog ---------- */

@@ -149,15 +149,23 @@ export interface Vlan {
 /** access = Geraet haengt in genau einem VLAN; trunk = Port fuehrt mehrere VLANs getaggt */
 export type PortMode = "access" | "trunk";
 
+/** Adresse eines Trunk-Geraets in einem getaggten VLAN, beim Router z. B. das Gateway */
+export interface VlanAddress {
+  vlan_id: number;
+  ip_address: string;
+}
+
 export interface Device {
   id: number;
   name: string;
+  /** Haupt-/Verwaltungsadresse - die wird angepingt und per SNMP abgefragt */
   ip_address: string;
   device_type: DeviceType;
   port_mode: PortMode;
   /** Access: das VLAN des Geraets. Trunk: das native (ungetaggte) VLAN */
   vlan_id: number | null;
   tagged_vlan_ids: number[];
+  vlan_addresses: VlanAddress[];
   is_active: boolean;
   snmp_enabled: boolean;
   agent_enabled: boolean;
@@ -167,6 +175,11 @@ export interface Device {
 export function deviceVlanIds(device: Device): number[] {
   const ids = device.vlan_id === null ? [] : [device.vlan_id];
   return device.port_mode === "trunk" ? [...ids, ...device.tagged_vlan_ids] : ids;
+}
+
+/** Adresse des Geraets in einem VLAN; ohne eigene Adresse dort die Haupt-IP. */
+export function deviceAddressInVlan(device: Device, vlanId: number | null): string {
+  return device.vlan_addresses.find((entry) => entry.vlan_id === vlanId)?.ip_address ?? device.ip_address;
 }
 
 /** Kurzbeschreibung fuer Tabellen, z. B. "Webserver (30)" oder "nativ 1 · getaggt 20, 30, 50". */
@@ -205,10 +218,15 @@ export interface ThresholdRule {
 
 export interface DeviceStatus {
   device: Device;
+  /** Letzter bekannter Wert - bei stale nicht mehr aktuell */
   reachable: boolean | null;
   overall_status: MetricStatus;
   latest_metrics: Record<string, number>;
   last_seen: string | null;
+  /** Vom Collector kommen seit einiger Zeit keine neuen Messwerte */
+  stale: boolean;
+  agent_last_seen: string | null;
+  agent_stale: boolean;
 }
 
 export interface MetricSamplePoint {
@@ -241,12 +259,18 @@ export function metricInfo(metricName: string): { label: string; unit: string } 
     cpu_pct: { label: "CPU-Last", unit: "%" },
     disk_pct: { label: "Festplattenbelegung", unit: "%" },
     mem_pct: { label: "Arbeitsspeicher", unit: "%" },
+    temp_c: { label: "Temperatur", unit: "°C" },
   };
   if (known[metricName]) return known[metricName];
   const iface = /^if(\d+)_(in|out)_bps$/.exec(metricName);
   if (iface) {
     return { label: `Interface ${iface[1]} ${iface[2] === "in" ? "eingehend" : "ausgehend"}`, unit: "bit/s" };
   }
+  const operStatus = /^if(\d+)_oper_status$/.exec(metricName);
+  if (operStatus) return { label: `Interface ${operStatus[1]} Status`, unit: "" };
+  // Weitere Laufwerke vom Agenten, z. B. disk_mnt_storage_pct fuer /mnt/storage
+  const disk = /^disk_(.+)_pct$/.exec(metricName);
+  if (disk) return { label: `Festplatte /${disk[1].replace(/_/g, "/")}`, unit: "%" };
   return { label: metricName, unit: "" };
 }
 
@@ -257,6 +281,8 @@ export function isChartableMetric(metricName: string): boolean {
 
 export function formatMetricValue(metricName: string, value: number): string {
   if (metricName === "reachable") return value >= 1 ? "erreichbar" : "nicht erreichbar";
+  // SNMP ifOperStatus: 1 = up, 2 = down, alles andere (testing, dormant ...) als Zahl
+  if (/_oper_status$/.test(metricName) && (value === 1 || value === 2)) return value === 1 ? "an (up)" : "aus (down)";
   const { unit } = metricInfo(metricName);
   if (unit === "bit/s") return formatBitrate(value);
   const rounded = Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1);
