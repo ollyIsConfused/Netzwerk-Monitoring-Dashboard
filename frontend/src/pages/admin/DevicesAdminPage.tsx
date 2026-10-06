@@ -7,6 +7,8 @@ import {
   DeviceConfig,
   DeviceType,
   DEVICE_TYPE_LABELS,
+  describeDeviceVlans,
+  PortMode,
   Vlan,
 } from "../../api/client";
 import { Icon } from "../../components/Icon";
@@ -16,7 +18,10 @@ interface DeviceForm {
   name: string;
   ip_address: string;
   device_type: DeviceType;
+  port_mode: PortMode;
+  /** Access: das VLAN, Trunk: das native (ungetaggte) VLAN */
   vlan_id: string;
+  tagged_vlan_ids: number[];
   is_active: boolean;
   snmp_enabled: boolean;
   snmp_community: string;
@@ -31,7 +36,9 @@ const EMPTY_FORM: DeviceForm = {
   name: "",
   ip_address: "",
   device_type: "other",
+  port_mode: "access",
   vlan_id: "",
+  tagged_vlan_ids: [],
   is_active: true,
   snmp_enabled: false,
   snmp_community: "",
@@ -74,7 +81,9 @@ function DeviceDialog({
           name: data.name,
           ip_address: data.ip_address,
           device_type: data.device_type,
+          port_mode: data.port_mode,
           vlan_id: data.vlan_id === null ? "" : String(data.vlan_id),
+          tagged_vlan_ids: data.tagged_vlan_ids,
           is_active: data.is_active,
           snmp_enabled: data.snmp_enabled,
           snmp_community: data.snmp_community ?? "",
@@ -93,8 +102,32 @@ function DeviceDialog({
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function setVlan(value: string) {
+    // Das native VLAN laeuft ungetaggt und kann nicht gleichzeitig getaggt sein
+    setForm((prev) => ({
+      ...prev,
+      vlan_id: value,
+      tagged_vlan_ids: prev.tagged_vlan_ids.filter((id) => String(id) !== value),
+    }));
+  }
+
+  function toggleTagged(vlanId: number, checked: boolean) {
+    setForm((prev) => ({
+      ...prev,
+      tagged_vlan_ids: checked
+        ? [...prev.tagged_vlan_ids, vlanId]
+        : prev.tagged_vlan_ids.filter((id) => id !== vlanId),
+    }));
+  }
+
+  const isTrunk = form.port_mode === "trunk";
+
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (isTrunk && form.tagged_vlan_ids.length === 0) {
+      setError("Wähle mindestens ein getaggtes VLAN - mit nur einem VLAN ist es ein Access-Port.");
+      return;
+    }
     if (form.snmp_enabled && !form.snmp_community.trim()) {
       setError("Für SNMP wird eine Community benötigt.");
       return;
@@ -109,7 +142,9 @@ function DeviceDialog({
       name: form.name.trim(),
       ip_address: form.ip_address.trim(),
       device_type: form.device_type,
+      port_mode: form.port_mode,
       vlan_id: form.vlan_id === "" ? null : Number(form.vlan_id),
+      tagged_vlan_ids: isTrunk ? form.tagged_vlan_ids : [],
       is_active: form.is_active,
       snmp_enabled: form.snmp_enabled,
       snmp_community: form.snmp_community.trim() || null,
@@ -166,8 +201,19 @@ function DeviceDialog({
               </select>
             </label>
             <label className="field">
-              <span>VLAN</span>
-              <select className="select" value={form.vlan_id} onChange={(e) => set("vlan_id", e.target.value)}>
+              <span>Anschluss am Switch</span>
+              <select
+                className="select"
+                value={form.port_mode}
+                onChange={(e) => set("port_mode", e.target.value as PortMode)}
+              >
+                <option value="access">Access-Port (ein VLAN)</option>
+                <option value="trunk">Trunk-Port (mehrere VLANs)</option>
+              </select>
+            </label>
+            <label className="field span-2">
+              <span>{isTrunk ? "Natives VLAN (ungetaggt)" : "VLAN"}</span>
+              <select className="select" value={form.vlan_id} onChange={(e) => setVlan(e.target.value)}>
                 <option value="">– keins –</option>
                 {vlans.map((vlan) => (
                   <option key={vlan.id} value={vlan.id}>
@@ -175,7 +221,35 @@ function DeviceDialog({
                   </option>
                 ))}
               </select>
+              {isTrunk && <small>Läuft ohne Tag über den Port, oft VLAN 1. Leer lassen, wenn es keins gibt.</small>}
             </label>
+            {isTrunk && (
+              <div className="field span-2">
+                <span>Getaggte VLANs</span>
+                {vlans.length === 0 ? (
+                  <small>Noch keine VLANs - zuerst unter „VLANs“ anlegen.</small>
+                ) : (
+                  <div className="check-grid" role="group" aria-label="Getaggte VLANs">
+                    {vlans.map((vlan) => {
+                      const isNative = String(vlan.id) === form.vlan_id;
+                      return (
+                        <label key={vlan.id} className="checkbox">
+                          <input
+                            type="checkbox"
+                            disabled={isNative}
+                            checked={!isNative && form.tagged_vlan_ids.includes(vlan.id)}
+                            onChange={(e) => toggleTagged(vlan.id, e.target.checked)}
+                          />
+                          {vlan.name} ({vlan.tag})
+                          {isNative && <span className="muted">· nativ</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                <small>Zum Beispiel der Router-Pi am Trunk: nativ VLAN 1, getaggt 20, 30 und 50.</small>
+              </div>
+            )}
             <label className="checkbox span-2">
               <input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} />
               Überwachung aktiv (aus = Gerät wird nicht gepollt)
@@ -304,11 +378,6 @@ export function DevicesAdminPage() {
     load();
   }, [load]);
 
-  const vlanName = (id: number | null) => {
-    const vlan = vlans.find((v) => v.id === id);
-    return vlan ? `${vlan.name} (${vlan.tag})` : "–";
-  };
-
   return (
     <div className="page">
       <div className="page-header">
@@ -353,7 +422,10 @@ export function DevicesAdminPage() {
                     </td>
                     <td className="mono">{device.ip_address}</td>
                     <td>{DEVICE_TYPE_LABELS[device.device_type]}</td>
-                    <td>{vlanName(device.vlan_id)}</td>
+                    <td>
+                      {device.port_mode === "trunk" && <span className="badge badge-plain badge-inline">Trunk</span>}
+                      {describeDeviceVlans(device, vlans)}
+                    </td>
                     <td className="muted">
                       {["Ping", device.snmp_enabled && "SNMP", device.agent_enabled && "Agent"].filter(Boolean).join(" · ")}
                     </td>

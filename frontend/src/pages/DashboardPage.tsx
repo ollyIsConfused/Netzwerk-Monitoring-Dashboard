@@ -5,6 +5,7 @@ import {
   api,
   apiErrorMessage,
   DEVICE_TYPE_LABELS,
+  deviceVlanIds,
   DeviceStatus,
   formatDateTime,
   formatMetricValue,
@@ -63,6 +64,11 @@ function DeviceTable({ rows, liveStatus }: { rows: DeviceStatus[]; liveStatus: L
             <tr key={row.device.id}>
               <td>
                 <Link to={`/devices/${row.device.id}`}>{row.device.name}</Link>
+                {row.device.port_mode === "trunk" && (
+                  <span className="badge badge-plain badge-inline-after" title="Trunk-Port: in mehreren VLANs">
+                    Trunk
+                  </span>
+                )}
               </td>
               <td className="mono">{row.device.ip_address}</td>
               <td>{DEVICE_TYPE_LABELS[row.device.device_type]}</td>
@@ -148,9 +154,12 @@ export function DashboardPage() {
   const devicesByVlan = useMemo(() => {
     const map = new Map<number | null, DeviceStatus[]>();
     for (const status of statuses) {
-      const key = status.device.vlan_id;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(status);
+      // Trunk-Geraete (z. B. der Router) erscheinen in jedem VLAN, das sie fuehren
+      const vlanIds = deviceVlanIds(status.device);
+      for (const key of vlanIds.length ? vlanIds : [null]) {
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(status);
+      }
     }
     return map;
   }, [statuses]);
