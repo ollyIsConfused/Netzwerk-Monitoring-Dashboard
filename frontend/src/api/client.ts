@@ -90,6 +90,9 @@ const FIELD_LABELS: Record<string, string> = {
   tag: "VLAN-Tag",
   ip_address: "IP-Adresse",
   snmp_port: "SNMP-Port",
+  snmp_v3_user: "SNMP-Benutzer",
+  snmp_v3_auth_password: "Auth-Passwort",
+  snmp_v3_priv_password: "Privacy-Passwort",
   metric_name: "Metrik",
   consecutive_breaches_required: "Messungen bis Alarm",
 };
@@ -168,6 +171,7 @@ export interface Device {
   vlan_addresses: VlanAddress[];
   is_active: boolean;
   snmp_enabled: boolean;
+  snmp_version: SnmpVersion;
   agent_enabled: boolean;
 }
 
@@ -198,10 +202,32 @@ export function describeDeviceVlans(device: Device, vlans: Vlan[]): string {
     .join(" · ");
 }
 
+export type SnmpVersion = "1" | "2c" | "3";
+
+export const SNMP_AUTH_PROTOCOLS: Record<string, string> = {
+  sha: "SHA",
+  sha256: "SHA-256",
+  sha512: "SHA-512",
+  sha224: "SHA-224",
+  sha384: "SHA-384",
+  md5: "MD5 (veraltet)",
+};
+
+/** Leerer Schluessel = keine Verschluesselung, nur Anmeldung */
+export const SNMP_PRIV_PROTOCOLS: Record<string, string> = {
+  aes: "AES-128",
+  des: "DES (schwach)",
+  "": "keine - nur Anmeldung",
+};
+
 export interface DeviceConfig extends Device {
   snmp_community: string | null;
-  snmp_version: string;
   snmp_port: number;
+  snmp_v3_user: string | null;
+  snmp_v3_auth_protocol: string | null;
+  snmp_v3_auth_password: string | null;
+  snmp_v3_priv_protocol: string | null;
+  snmp_v3_priv_password: string | null;
   snmp_interfaces: string | null;
   agent_token: string | null;
 }

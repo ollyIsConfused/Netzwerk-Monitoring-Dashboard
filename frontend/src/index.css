@@ -632,6 +632,12 @@ td.actions {
   font-size: 12px;
 }
 
+/* Hinweistext direkt im Formular-Raster (nicht innerhalb eines Feldes) */
+.field-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .input,
 .select,
 textarea.input {

@@ -191,7 +191,15 @@ def test_add_missing_columns_upgrades_devices(tmp_path):
         conn.execute(text("INSERT INTO device_tagged_vlans VALUES (1, 1)"))
     Base.metadata.create_all(bind=engine)
 
-    assert sorted(add_missing_columns(engine)) == ["device_tagged_vlans.ip_address", "devices.agent_last_push_at"]
+    assert sorted(add_missing_columns(engine)) == [
+        "device_tagged_vlans.ip_address",
+        "devices.agent_last_push_at",
+        "devices.snmp_v3_auth_password",
+        "devices.snmp_v3_auth_protocol",
+        "devices.snmp_v3_priv_password",
+        "devices.snmp_v3_priv_protocol",
+        "devices.snmp_v3_user",
+    ]
     assert add_missing_columns(engine) == []
     with engine.connect() as conn:
         assert tuple(conn.execute(text("SELECT device_id, vlan_id, ip_address FROM device_tagged_vlans")).one()) == (
