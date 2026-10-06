@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { AlertEvent, api, apiErrorMessage, Device, formatDateTime, metricInfo } from "../api/client";
 import { useAuth } from "../api/AuthContext";
 import { Icon } from "../components/Icon";

@@ -22,6 +22,10 @@ fi
   echo "  cd backend && python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt"
   exit 1
 }
+command -v node >/dev/null 2>&1 || { echo "Fehlt: Node.js (20.19+ oder 22.12+), z. B. brew install node"; exit 1; }
+# Mindestversion von Vite 8
+node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit((a === 20 && b >= 19) || (a === 22 && b >= 12) || a > 22 ? 0 : 1)' \
+  || { echo "Node.js $(node --version) ist zu alt - Vite 8 braucht 20.19+ oder 22.12+ (brew upgrade node)."; exit 1; }
 [ -d frontend/node_modules ] || (cd frontend && npm install)
 
 if [ "${SKIP_DB:-0}" != "1" ]; then
