@@ -21,11 +21,15 @@ Collector ──ICMP/SNMP──▶ Geräte in allen VLANs (lokal vom Router aus,
 
 Webserver (Backend) ──postgresql://<nas-ip>:5432──▶ NAS-Pi (Postgres,
                           Datenverzeichnis auf dem Festplatten-Array)
+
+Agent auf NAS/Webserver/Router-Pi/Pi-hole ──HTTP + Agent-Token──▶ Webserver:8080/api
+                          (CPU, Arbeitsspeicher, Festplatte, Temperatur; optional)
 ```
 
 Das Backend lauscht nur lokal auf dem Webserver; nach außen ist nur der eine
-nginx-Port sichtbar. Für Webserver und Router-Pi gibt es Installationsskripte,
-die beim ersten Mal einrichten und danach als Update dienen (Abschnitte 1 und 2).
+nginx-Port sichtbar. Für Webserver, Router-Pi und die Agenten gibt es
+Installationsskripte, die beim ersten Mal einrichten und danach als Update dienen
+(Abschnitte 1 bis 3).
 
 ## 0. NAS-Pi: Postgres
 
@@ -196,9 +200,11 @@ ausgehend Port 587 (bzw. 465) erlauben. Links in den Mails zeigen auf
 Dashboard über eine andere Adresse aufruft, ändert den Wert in der `.env` und
 startet das Skript erneut.
 
-## 2. Router-Pi: nur der Collector
+## 2. Router-Pi: Collector
 
 Netzwerk-Setup ist bereits vorhanden – hier geht es nur um den Collector-Prozess selbst.
+
+### 2.1 Installieren
 
 ```bash
 git clone https://github.com/ollyIsConfused/Netzwerk-Monitoring-Dashboard.git ~/Netzwerk-Monitoring-Dashboard
@@ -226,7 +232,200 @@ Logs: `journalctl -u monitoring-collector -f`
 und die Verbindung zum Webserver sind ausgehender Verkehr des Routers und von
 den Weiterleitungsregeln (`ufw route`) nicht betroffen.
 
-## 3. Dashboard erreichbar machen
+### 2.2 So arbeitet der Collector
+
+Alle 30 Sekunden (`POLL_INTERVAL_SECONDS`):
+
+1. Er holt mit seinem Token die Liste der aktiven Geräte vom Backend
+   (`GET /api/collector/devices`).
+2. Er pingt jedes Gerät 5-mal an. Daraus werden Erreichbarkeit, Paketverlust und
+   Antwortzeit.
+3. Bei den Typen Switch und Router fragt er per SNMP v2c je eingetragenem
+   Interface-Index den Status (`ifOperStatus`) und die Byte-Zähler ab und berechnet
+   daraus die Bandbreite.
+4. Er schickt alle Werte an das Backend (`POST /api/collector/metrics`). Speichern,
+   Schwellenwerte prüfen, Alarme und Mails übernimmt das Backend. Der Collector selbst
+   hat keinen Zugriff auf die Datenbank.
+
+**Absenderadresse:** Der Router-Pi hat in jedem VLAN eine eigene Adresse (das
+Gateway). Linux nimmt als Absender immer die Adresse der Schnittstelle, über die das
+Ziel erreicht wird:
+
+| Ziel                         | Absender des Collectors        |
+|------------------------------|--------------------------------|
+| Pi-hole `192.168.20.10`      | `192.168.20.1` (`eth0.20`)     |
+| Webserver `192.168.30.15`    | `192.168.30.1` (`eth0.30`)     |
+| NAS `192.168.50.25`          | `192.168.50.1` (`eth0.50`)     |
+| Router-Pi `192.168.178.66`   | `192.168.178.66` (lokal)       |
+
+Nachprüfen auf dem Router-Pi mit `ip route get 192.168.20.10` (Feld `src`). Wichtig
+ist das für SNMP-Freigaben auf den Geräten (Abschnitt 2.4).
+
+Die Zeitstempel der Messwerte kommen von der Uhr des Router-Pi. Geht sie falsch,
+meldet das Dashboard die Werte als veraltet. `timedatectl` muss
+`System clock synchronized: yes` zeigen.
+
+### 2.3 Den Router-Pi im Dashboard eintragen
+
+Vorher unter *Verwaltung > VLANs* die VLANs anlegen, z. B. Heimnetz (Tag 1, das
+ungetaggte FritzBox-Netz), DNS (20), Server (30) und NAS (50). Dann unter
+*Verwaltung > Geräte*:
+
+| Feld                          | Wert                                              |
+|-------------------------------|---------------------------------------------------|
+| Name / Typ                    | Router-Pi / Router                                |
+| Haupt-IP (Verwaltung)         | `192.168.178.66`                                  |
+| Anschluss am Switch           | Trunk-Port                                        |
+| Natives VLAN                  | Heimnetz (VLAN 1)                                 |
+| Getaggte VLANs                | DNS (20), Server (30), NAS (50)                   |
+| Adresse in VLAN 20 / 30 / 50  | `192.168.20.1` / `192.168.30.1` / `192.168.50.1`  |
+
+Die Übersicht zeigt den Router-Pi dann in jeder VLAN-Karte mit seiner Adresse dort.
+Angepingt und per SNMP abgefragt wird die Haupt-IP.
+
+Weil der Collector auf dem Router-Pi läuft, pingt er sich selbst an – der Router-Pi
+ist damit immer „online“. Aussagekräftig ist bei ihm der Zustand seiner
+Schnittstellen über SNMP. Dafür auf dem Router-Pi snmpd einrichten:
+
+```bash
+sudo apt install snmpd snmp
+sudo cp /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-$(date +%F)
+sudo nano /etc/snmp/snmpd.conf
+```
+
+Die vorhandene `agentaddress`-Zeile und die `rocommunity public …`-Zeilen
+auskommentieren (`#` davor) und stattdessen eintragen (`<community>` ist ein
+selbst gewähltes, nicht erratbares Wort):
+
+```
+agentaddress udp:127.0.0.1:161,udp:192.168.178.66:161
+rocommunity <community> 127.0.0.1
+rocommunity <community> 192.168.178.66
+```
+
+- `agentaddress`: auf welchen Adressen snmpd lauscht. Standard ist nur
+  `127.0.0.1`; der Collector fragt aber die Haupt-IP `192.168.178.66` ab.
+- `rocommunity`: nur lesen, und nur für Anfragen von diesen Absendern. Fragt der
+  Router-Pi sich selbst über `192.168.178.66` ab, ist das auch der Absender.
+  `127.0.0.1` ist für Tests von Hand.
+- Port 161 von außen bleibt durch ufw gesperrt (eingehend standardmäßig `deny`) –
+  dafür keine Regel anlegen.
+
+```bash
+sudo systemctl restart snmpd
+snmpwalk -v2c -c <community> 192.168.178.66 IF-MIB::ifDescr
+```
+
+Die Ausgabe sieht etwa so aus (die Nummern unterscheiden sich je System):
+
+```
+IF-MIB::ifDescr.1 = STRING: lo
+IF-MIB::ifDescr.2 = STRING: eth0
+IF-MIB::ifDescr.5 = STRING: eth0.20
+IF-MIB::ifDescr.6 = STRING: eth0.30
+IF-MIB::ifDescr.7 = STRING: eth0.50
+IF-MIB::ifDescr.8 = STRING: wg0
+```
+
+Die Zahl nach `ifDescr.` ist der Interface-Index. Im Gerät unter SNMP eintragen:
+Community, Version v2c, Port 161 und als Interface-Indizes z. B. `2,5,6,7,8`
+(`eth0`, die drei VLAN-Schnittstellen und das VPN). Danach zeigt die Detailseite
+pro Schnittstelle Status und Bandbreite – also auch pro VLAN-Gateway. Mit der
+Schwellenwert-Vorlage „Interface N Status: aus“ (kritisch ab 2) gibt es einen Alarm,
+sobald eine Schnittstelle ausfällt; die `eth0.X`-Schnittstellen fallen mit, wenn das
+Trunk-Kabel gezogen wird.
+
+### 2.4 SNMP auf anderen Geräten (z. B. Switch)
+
+Die SNMP-Freigabe eines Geräts muss die Gateway-Adresse des Router-Pi in dem VLAN
+erlauben, in dem die Verwaltungsadresse des Geräts liegt (Tabelle in Abschnitt 2.2).
+Hat der Switch z. B. die Adresse `192.168.20.2`, kommt die Anfrage von
+`192.168.20.1`. Die Adresse des Webservers (`192.168.30.15`) ist dafür falsch – der
+Webserver fragt keine Geräte ab.
+
+## 3. Agent auf den Servern (CPU, Arbeitsspeicher, Festplatte)
+
+Was Ping und SNMP nicht liefern, schickt ein kleiner Agent vom Gerät selbst an das
+Backend: CPU-Last (`cpu_pct`), Arbeitsspeicher (`mem_pct`), Belegung von `/`
+(`disk_pct`) und weiterer Laufwerke (z. B. `disk_mnt_storage_pct` für
+`/mnt/storage`) und, wo vorhanden, die Temperatur (`temp_c`, z. B. beim Raspberry Pi).
+Er braucht nur bash, awk, df und curl und läuft auf NAS, Webserver, Router-Pi und
+Pi-hole.
+
+### 3.1 Im Dashboard vorbereiten
+
+*Verwaltung > Geräte >* Gerät bearbeiten > „Agent darf Messwerte an /agent/push
+senden“ anhaken > „Generieren“ > Speichern. Jedes Gerät bekommt ein eigenes Token.
+
+### 3.2 Auf dem Gerät installieren
+
+```bash
+git clone https://github.com/ollyIsConfused/Netzwerk-Monitoring-Dashboard.git ~/Netzwerk-Monitoring-Dashboard
+cd ~/Netzwerk-Monitoring-Dashboard
+sudo ./deploy/agent/install-agent.sh
+```
+
+(Ist das Repo schon da, statt `git clone` nur `git pull`.) Das Skript fragt:
+
+- **Backend-Adresse:** `http://192.168.30.15:8080/api` (auf dem Webserver selbst
+  geht auch `http://127.0.0.1:8080/api`)
+- **Agent-Token** aus dem Dashboard (Eingabe wird nicht angezeigt)
+- **Laufwerke:** Vorschlag aus `df`, auf der NAS z. B. `/ /mnt/storage`. Ist ein
+  Laufwerk nicht eingehängt, lässt der Agent es weg, statt die Systemplatte zu melden.
+- **Intervall:** 60 Sekunden (15 bis 120)
+
+Dann speichert es die Werte in `/etc/monitoring-agent.env` (nur für root lesbar),
+kopiert den Agenten nach `/opt/monitoring-agent`, **sendet einmal zur Probe** (mit
+klarer Meldung bei falschem Token, falscher Adresse oder blockierter Verbindung) und
+richtet den systemd-Timer `monitoring-agent.timer` ein. Der Agent läuft dabei als
+eigener Benutzer ohne Rechte und kann das Dateisystem nur lesen.
+
+- Werte ansehen, ohne zu senden: `/opt/monitoring-agent/monitoring-agent.sh --print`
+- Log: `journalctl -u monitoring-agent -n 20`
+- Update: `git pull && sudo ./deploy/agent/install-agent.sh` (Enter übernimmt die bisherigen Werte)
+- Abschalten: `sudo systemctl disable --now monitoring-agent.timer`
+
+Im Dashboard gibt es danach beim Gerät unter „Schwellenwerte“ Vorlagen für CPU-Last,
+Arbeitsspeicher, Festplatte und Temperatur.
+
+### 3.3 Firewall
+
+Der Agent verbindet sich vom Gerät zum Webserver, Port 8080. Webserver (lokal) und
+Router-Pi (eigener ausgehender Verkehr) brauchen keine Regel. NAS und Pi-hole liegen
+in anderen VLANs, dort muss der Router-Pi die Verbindung weiterleiten. Zuerst den
+IST-Zustand ansehen:
+
+```bash
+sudo ufw status numbered
+```
+
+Dann die beiden Regeln **ergänzen** (es wird nichts gelöscht oder ersetzt):
+
+```bash
+sudo ufw route allow in on eth0.50 out on eth0.30 proto tcp from 192.168.50.25 to 192.168.30.15 port 8080
+sudo ufw route allow in on eth0.20 out on eth0.30 proto tcp from 192.168.20.10 to 192.168.30.15 port 8080
+```
+
+- `route allow`: erlaubt Weiterleitung durch den Router (nicht Verbindungen zum
+  Router selbst – SSH auf den Router-Pi bleibt davon unberührt).
+- `in on eth0.50 out on eth0.30`: von VLAN 50 (NAS) nach VLAN 30 (Webserver).
+- `from … to … port 8080 proto tcp`: genau ein Absender, ein Ziel, ein Port.
+
+Die Antworten des Webservers lässt ufw automatisch zurück (bestehende Verbindung).
+ufw speichert die Regeln dauerhaft (`/etc/ufw/user.rules`). Steht in
+`ufw status numbered` oberhalb schon eine `DENY`-Regel für denselben Weg, greift die
+neue Regel nicht – dann mit `sudo ufw insert <nummer> route allow …` davor einfügen.
+
+### 3.4 Veraltete Daten
+
+Kommen vom Collector oder von einem Agenten länger als `STALE_AFTER_SECONDS`
+(Standard 180, in der `.env` auf dem Webserver) keine neuen Werte, zeigt die Übersicht
+„Veraltet“ statt online/offline und oben einen Hinweis, was zu prüfen ist. Das
+Agent-Intervall muss deshalb deutlich kleiner sein (das Skript erlaubt höchstens 120 s).
+Fragt der Collector sehr viele Geräte ab (er arbeitet sie nacheinander ab, ca. 4–6 s
+pro Gerät), den Wert erhöhen.
+
+## 4. Dashboard erreichbar machen
 
 Das Dashboard soll nicht öffentlich sein, sondern nur per VPN (bzw. aus dem
 Heimnetz) erreichbar. Dafür braucht es auf dem Router-Pi eine Weiterleitungsregel
@@ -244,7 +443,7 @@ ein einziges `reverse_proxy <webserver-ip>:8080` – nginx auf dem Webserver
 verteilt `/api` und `/ws` bereits selbst. Dann den Zugriff unbedingt auf VPN und
 Heimnetz beschränken.
 
-## 4. Testen
+## 5. Testen
 
 1. Vom Webserver aus die DB-Verbindung prüfen: `psql -h <nas-ip> -U monitoring -d monitoring`
    sollte klappen; derselbe Befehl von einem dritten Host aus sollte an der
@@ -254,10 +453,15 @@ Heimnetz beschränken.
 4. Ein echtes Gerät anlegen (IP, VLAN, ggf. SNMP-Community) und ein paar
    Minuten warten – `journalctl -u monitoring-collector -f` sollte
    Poll-Zyklen zeigen, im Dashboard sollte der Status auf „OK“ springen.
-5. Testweise ein Gerät vom Netz nehmen → nach der konfigurierten Anzahl
-   aufeinanderfolgender Fehlschläge sollte ein Alarm samt E-Mail kommen.
+5. Beim Gerät einen Schwellenwert anlegen (Vorlage „Offline-Alarm“) und es
+   testweise vom Netz nehmen → nach der konfigurierten Anzahl aufeinanderfolgender
+   Fehlschläge sollte ein Alarm samt E-Mail kommen. Ohne Schwellenwert zeigt die
+   Übersicht nur „Offline“, löst aber keinen Alarm aus.
+6. Collector anhalten (`sudo systemctl stop monitoring-collector` auf dem Router-Pi)
+   → nach etwa 3 Minuten zeigt die Übersicht „Veraltet“ und einen Hinweis. Danach
+   `sudo systemctl start monitoring-collector`.
 
-## 5. Sicherheits-Checkliste
+## 6. Sicherheits-Checkliste
 
 - `JWT_SECRET` und `COLLECTOR_API_TOKEN` sind echte Zufallsstrings, nicht die
   Beispielwerte aus `.env.example`.
@@ -269,7 +473,12 @@ Heimnetz beschränken.
 - Das Postgres-Datenverzeichnis liegt auf dem Festplatten-Array der NAS, nicht
   auf der SD-Karte (Abschnitt 0.2), und wird regelmäßig per `pg_dump` gesichert
   (Abschnitt 0.5).
-- Das Dashboard ist nur per VPN bzw. aus dem Heimnetz erreichbar (Abschnitt 3),
+- Das Dashboard ist nur per VPN bzw. aus dem Heimnetz erreichbar (Abschnitt 4),
   das Backend lauscht nur auf `127.0.0.1`.
+- snmpd auf dem Router-Pi nutzt eine eigene Community, nicht `public`, und erlaubt
+  nur die eigenen Adressen (Abschnitt 2.3); Port 161 ist von außen nicht freigegeben.
+- Jeder Agent hat ein eigenes Token; `/etc/monitoring-agent.env` ist nur für root
+  lesbar. Für die Agenten von NAS und Pi-hole sind nur die beiden Regeln zum
+  Webserver-Port freigegeben (Abschnitt 3.3).
 - SNMP nach Möglichkeit auf v3 (Auth+Privacy) umstellen, sobald die Geräte es
   unterstützen – v2c überträgt die Community im Klartext.

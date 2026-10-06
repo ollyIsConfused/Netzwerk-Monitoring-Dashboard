@@ -5,11 +5,13 @@ import {
   api,
   apiErrorMessage,
   DEVICE_TYPE_LABELS,
+  deviceAddressInVlan,
   deviceVlanIds,
   DeviceStatus,
   formatDateTime,
   formatMetricValue,
   MetricStatus,
+  parseTimestamp,
   Vlan,
 } from "../api/client";
 import { useAuth } from "../api/AuthContext";
@@ -34,7 +36,67 @@ function StatTile({ label, value, color, hint }: { label: string; value: number;
   );
 }
 
-function DeviceTable({ rows, liveStatus }: { rows: DeviceStatus[]; liveStatus: LiveStatus }) {
+function newestTimestamp(values: (string | null)[]): string | null {
+  const present = values.filter((value): value is string => value !== null);
+  return present.length ? present.reduce((a, b) => (parseTimestamp(a) >= parseTimestamp(b) ? a : b)) : null;
+}
+
+/** Hinweise, wenn Collector oder Agenten keine neuen Messwerte mehr schicken. */
+function FreshnessNotices({ statuses }: { statuses: DeviceStatus[] }) {
+  const stale = statuses.filter((s) => s.stale);
+  const silentAgents = statuses.filter((s) => s.device.agent_enabled && s.agent_stale);
+  const missingAgents = statuses.filter((s) => s.device.agent_enabled && s.agent_last_seen === null);
+  const names = (rows: DeviceStatus[]) => rows.map((s) => s.device.name).join(", ");
+
+  return (
+    <>
+      {stale.length > 0 && (
+        <Notice kind="warning">
+          <p>
+            <b>
+              {stale.length === statuses.length
+                ? "Vom Collector kommen keine neuen Messwerte."
+                : `Für ${names(stale)} kommen keine neuen Messwerte.`}
+            </b>{" "}
+            Letzter Wert: {formatDateTime(newestTimestamp(stale.map((s) => s.last_seen)))}. Bis dahin zeigt die
+            Übersicht den letzten bekannten Stand.
+          </p>
+          <p>
+            Auf dem Rechner mit dem Collector (z. B. Router-Pi) prüfen:{" "}
+            <code>systemctl status monitoring-collector</code> und{" "}
+            <code>journalctl -u monitoring-collector -n 50</code>
+          </p>
+        </Notice>
+      )}
+      {silentAgents.length > 0 && (
+        <Notice kind="warning">
+          {silentAgents.map((s) => (
+            <p key={s.device.id}>
+              Der Agent auf <b>{s.device.name}</b> meldet sich seit {formatDateTime(s.agent_last_seen)} nicht mehr.
+              Auf dem Gerät prüfen: <code>systemctl status monitoring-agent.timer</code>
+            </p>
+          ))}
+        </Notice>
+      )}
+      {missingAgents.length > 0 && (
+        <Notice kind="info">
+          Noch keine Agent-Daten von <b>{names(missingAgents)}</b>. Auf dem Gerät einrichten:{" "}
+          <code>sudo ./deploy/agent/install-agent.sh</code>
+        </Notice>
+      )}
+    </>
+  );
+}
+
+function DeviceTable({
+  rows,
+  liveStatus,
+  vlanId,
+}: {
+  rows: DeviceStatus[];
+  liveStatus: LiveStatus;
+  vlanId: number | null;
+}) {
   if (rows.length === 0) return <div className="empty">Keine Geräte in diesem VLAN.</div>;
   return (
     <div className="table-wrap">
@@ -60,33 +122,42 @@ function DeviceTable({ rows, liveStatus }: { rows: DeviceStatus[]; liveStatus: L
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.device.id}>
-              <td>
-                <Link to={`/devices/${row.device.id}`}>{row.device.name}</Link>
-                {row.device.port_mode === "trunk" && (
-                  <span className="badge badge-plain badge-inline-after" title="Trunk-Port: in mehreren VLANs">
-                    Trunk
-                  </span>
-                )}
-              </td>
-              <td className="mono">{row.device.ip_address}</td>
-              <td>{DEVICE_TYPE_LABELS[row.device.device_type]}</td>
-              <td>
-                <ReachableBadge reachable={row.reachable} />
-              </td>
-              <td>
-                <StatusBadge status={liveStatus[row.device.id] ?? row.overall_status} />
-              </td>
-              <td className="num">
-                {/* Bei offline Geraeten ist die letzte Antwortzeit veraltet */}
-                {row.reachable !== false && row.latest_metrics.latency_ms !== undefined
-                  ? formatMetricValue("latency_ms", row.latest_metrics.latency_ms)
-                  : "–"}
-              </td>
-              <td className="num muted">{formatDateTime(row.last_seen)}</td>
-            </tr>
-          ))}
+          {rows.map((row) => {
+            // Trunk-Geraete (z. B. der Router) zeigen ihre Adresse in diesem VLAN, etwa das Gateway
+            const address = deviceAddressInVlan(row.device, vlanId);
+            return (
+              <tr key={row.device.id}>
+                <td>
+                  <Link to={`/devices/${row.device.id}`}>{row.device.name}</Link>
+                  {row.device.port_mode === "trunk" && (
+                    <span className="badge badge-plain badge-inline-after" title="Trunk-Port: in mehreren VLANs">
+                      Trunk
+                    </span>
+                  )}
+                </td>
+                <td
+                  className="mono"
+                  title={address !== row.device.ip_address ? `Überwacht wird ${row.device.ip_address}` : undefined}
+                >
+                  {address}
+                </td>
+                <td>{DEVICE_TYPE_LABELS[row.device.device_type]}</td>
+                <td>
+                  <ReachableBadge reachable={row.reachable} stale={row.stale} />
+                </td>
+                <td>
+                  <StatusBadge status={liveStatus[row.device.id] ?? row.overall_status} />
+                </td>
+                <td className="num">
+                  {/* Bei offline Geraeten oder veralteten Daten ist die letzte Antwortzeit nicht aussagekraeftig */}
+                  {row.reachable !== false && !row.stale && row.latest_metrics.latency_ms !== undefined
+                    ? formatMetricValue("latency_ms", row.latest_metrics.latency_ms)
+                    : "–"}
+                </td>
+                <td className="num muted">{formatDateTime(row.last_seen)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -168,8 +239,9 @@ export function DashboardPage() {
     const effective = statuses.map((s) => liveStatus[s.device.id] ?? s.overall_status);
     return {
       total: statuses.length,
-      online: statuses.filter((s) => s.reachable === true).length,
-      offline: statuses.filter((s) => s.reachable === false).length,
+      // Veraltete Werte zaehlen weder als online noch als offline
+      online: statuses.filter((s) => s.reachable === true && !s.stale).length,
+      offline: statuses.filter((s) => s.reachable === false && !s.stale).length,
       warning: effective.filter((s) => s === "warning").length,
       critical: effective.filter((s) => s === "critical").length,
     };
@@ -189,6 +261,7 @@ export function DashboardPage() {
       </div>
 
       {error && <Notice kind="error">{error}</Notice>}
+      <FreshnessNotices statuses={statuses} />
 
       <div className="stat-grid">
         <StatTile label="Geräte" value={counts.total} hint="aktiv überwacht" />
@@ -219,7 +292,7 @@ export function DashboardPage() {
               </h2>
               {vlan.description && <span className="muted">{vlan.description}</span>}
             </div>
-            <DeviceTable rows={devicesByVlan.get(vlan.id) ?? []} liveStatus={liveStatus} />
+            <DeviceTable rows={devicesByVlan.get(vlan.id) ?? []} liveStatus={liveStatus} vlanId={vlan.id} />
           </section>
         ))}
 
@@ -228,7 +301,7 @@ export function DashboardPage() {
           <div className="card-header">
             <h2>Ohne VLAN</h2>
           </div>
-          <DeviceTable rows={unassigned} liveStatus={liveStatus} />
+          <DeviceTable rows={unassigned} liveStatus={liveStatus} vlanId={null} />
         </section>
       )}
     </div>

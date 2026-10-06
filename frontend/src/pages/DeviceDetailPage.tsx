@@ -6,6 +6,7 @@ import {
   apiErrorMessage,
   describeDeviceVlans,
   Device,
+  DeviceStatus,
   DEVICE_TYPE_LABELS,
   formatDateTime,
   formatMetricValue,
@@ -43,6 +44,7 @@ export function DeviceDetailPage() {
 
   const [device, setDevice] = useState<Device | null>(null);
   const [vlans, setVlans] = useState<Vlan[]>([]);
+  const [status, setStatus] = useState<DeviceStatus | null>(null);
   const [samplesByMetric, setSamplesByMetric] = useState<Record<string, MetricSamplePoint[]>>({});
   const [rules, setRules] = useState<ThresholdRule[]>([]);
   const [alerts, setAlerts] = useState<AlertEvent[]>([]);
@@ -79,15 +81,19 @@ export function DeviceDetailPage() {
     async function load() {
       setLoading(true);
       try {
-        const response = await api.get<MetricSamplePoint[]>(`/devices/${deviceId}/metrics`, {
-          params: { since_minutes: rangeMinutes },
-        });
+        const [response, statusRes] = await Promise.all([
+          api.get<MetricSamplePoint[]>(`/devices/${deviceId}/metrics`, { params: { since_minutes: rangeMinutes } }),
+          api.get<DeviceStatus>(`/devices/${deviceId}/status`),
+        ]);
         const grouped: Record<string, MetricSamplePoint[]> = {};
         for (const sample of response.data) {
           if (!grouped[sample.metric_name]) grouped[sample.metric_name] = [];
           grouped[sample.metric_name].push(sample);
         }
-        if (!cancelled) setSamplesByMetric(grouped);
+        if (!cancelled) {
+          setSamplesByMetric(grouped);
+          setStatus(statusRes.data);
+        }
       } catch (err) {
         if (!cancelled) setError(apiErrorMessage(err, "Messwerte konnten nicht geladen werden."));
       } finally {
@@ -140,6 +146,24 @@ export function DeviceDetailPage() {
                 {device.port_mode === "trunk" ? "Trunk" : "VLAN"}{" "}
                 <b>{describeDeviceVlans(device, vlans).replace(/^–$/, "keins")}</b>
               </span>
+              {device.vlan_addresses.length > 0 && (
+                <span>
+                  In den VLANs{" "}
+                  <b className="mono">
+                    {device.vlan_addresses
+                      .map((entry) => {
+                        const tag = vlans.find((vlan) => vlan.id === entry.vlan_id)?.tag;
+                        return tag === undefined ? entry.ip_address : `${entry.ip_address} (${tag})`;
+                      })
+                      .join(" · ")}
+                  </b>
+                </span>
+              )}
+              {device.agent_enabled && status?.agent_last_seen && (
+                <span>
+                  Agent zuletzt <b>{formatDateTime(status.agent_last_seen)}</b>
+                </span>
+              )}
               {!device.is_active && <span className="badge badge-plain">pausiert</span>}
             </div>
           )}
@@ -160,6 +184,25 @@ export function DeviceDetailPage() {
       </div>
 
       {error && device && <Notice kind="error">{error}</Notice>}
+      {status?.stale && (
+        <Notice kind="warning">
+          Seit {formatDateTime(status.last_seen)} kommen vom Collector keine neuen Messwerte für dieses Gerät. Die
+          Diagramme zeigen den Stand bis dahin. Auf dem Rechner mit dem Collector (z. B. Router-Pi) prüfen:{" "}
+          <code>systemctl status monitoring-collector</code>
+        </Notice>
+      )}
+      {device?.agent_enabled && status && status.agent_last_seen === null && (
+        <Notice kind="info">
+          Der Agent hat noch keine Daten geschickt. Auf dem Gerät einrichten:{" "}
+          <code>sudo ./deploy/agent/install-agent.sh</code> (fragt nach Backend-Adresse und Agent-Token).
+        </Notice>
+      )}
+      {device?.agent_enabled && status?.agent_stale && (
+        <Notice kind="warning">
+          Der Agent meldet sich seit {formatDateTime(status.agent_last_seen)} nicht mehr. Auf dem Gerät prüfen:{" "}
+          <code>systemctl status monitoring-agent.timer</code> und <code>journalctl -u monitoring-agent -n 20</code>
+        </Notice>
+      )}
 
       <div className="grid-2">
         {chartMetrics.map((metricName) => (

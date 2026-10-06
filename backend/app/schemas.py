@@ -27,6 +27,13 @@ def _validate_host(value: str) -> str:
     return value
 
 
+def _validate_ip(value: str) -> str:
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        raise ValueError("Keine gültige IP-Adresse") from None
+
+
 def _validate_email(value: str) -> str:
     value = value.strip()
     if not _EMAIL_RE.match(value):
@@ -35,6 +42,7 @@ def _validate_email(value: str) -> str:
 
 
 HostStr = Annotated[str, AfterValidator(_validate_host)]
+IpStr = Annotated[str, AfterValidator(_validate_ip)]
 PortMode = Literal["access", "trunk"]
 EmailStr = Annotated[str, AfterValidator(_validate_email)]
 
@@ -142,6 +150,14 @@ class ThresholdRuleUpdate(BaseModel):
     consecutive_breaches_required: Optional[int] = Field(default=None, ge=1, le=100)
 
 
+class VlanAddress(BaseModel):
+    """Adresse eines Trunk-Geraets in einem seiner getaggten VLANs (beim Router: das Gateway)."""
+
+    model_config = ConfigDict(from_attributes=True)
+    vlan_id: int
+    ip_address: IpStr
+
+
 class DeviceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     ip_address: HostStr
@@ -151,6 +167,8 @@ class DeviceCreate(BaseModel):
     port_mode: PortMode = "access"
     vlan_id: Optional[int] = None
     tagged_vlan_ids: list[int] = Field(default_factory=list)
+    # Optional je getaggtem VLAN; ueberwacht wird weiter ip_address
+    vlan_addresses: list[VlanAddress] = Field(default_factory=list)
     is_active: bool = True
     snmp_enabled: bool = False
     snmp_community: Optional[str] = None
@@ -168,6 +186,7 @@ class DeviceUpdate(BaseModel):
     port_mode: Optional[PortMode] = None
     vlan_id: Optional[int] = None
     tagged_vlan_ids: Optional[list[int]] = None
+    vlan_addresses: Optional[list[VlanAddress]] = None
     is_active: Optional[bool] = None
     snmp_enabled: Optional[bool] = None
     snmp_community: Optional[str] = None
@@ -187,6 +206,7 @@ class DeviceOut(BaseModel):
     port_mode: PortMode
     vlan_id: Optional[int] = None
     tagged_vlan_ids: list[int] = []
+    vlan_addresses: list[VlanAddress] = []
     is_active: bool
     snmp_enabled: bool
     agent_enabled: bool
@@ -204,10 +224,15 @@ class DeviceConfigOut(DeviceOut):
 
 class DeviceStatusOut(BaseModel):
     device: DeviceOut
+    # Letzter bekannter Wert - bei stale=True nicht mehr aktuell
     reachable: Optional[bool] = None
     overall_status: MetricStatus
     latest_metrics: dict[str, float]
     last_seen: Optional[datetime] = None
+    # Seit STALE_AFTER_SECONDS kein neuer Messwert vom Collector
+    stale: bool = False
+    agent_last_seen: Optional[datetime] = None
+    agent_stale: bool = False
 
 
 class MetricSampleOut(BaseModel):
@@ -235,7 +260,7 @@ class AgentMetricPush(BaseModel):
     """Payload a custom agent (e.g. on the NAS/webserver) pushes to the backend."""
 
     agent_token: str
-    metrics: dict[str, float]
+    metrics: dict[Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$")], float]
 
 
 class CollectorDeviceOut(BaseModel):

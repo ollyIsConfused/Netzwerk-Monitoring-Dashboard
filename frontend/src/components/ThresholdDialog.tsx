@@ -4,11 +4,32 @@ import { Modal, Notice } from "./Modal";
 
 type NumberField = "warning_max" | "critical_max" | "warning_min" | "critical_min";
 
-const PRESETS: { label: string; metric: string; values: Partial<Record<NumberField, number>> }[] = [
+type Preset = { label: string; metric: string; values: Partial<Record<NumberField, number>> };
+
+const PRESETS: Preset[] = [
   { label: "Offline-Alarm", metric: "reachable", values: { critical_min: 0 } },
   { label: "Antwortzeit", metric: "latency_ms", values: { warning_max: 100, critical_max: 500 } },
   { label: "Paketverlust", metric: "packet_loss_pct", values: { warning_max: 10, critical_max: 50 } },
+  // Vom Agenten
+  { label: "CPU-Last", metric: "cpu_pct", values: { warning_max: 80, critical_max: 95 } },
+  { label: "Arbeitsspeicher", metric: "mem_pct", values: { warning_max: 85, critical_max: 95 } },
+  { label: "Festplatte", metric: "disk_pct", values: { warning_max: 80, critical_max: 90 } },
+  { label: "Temperatur", metric: "temp_c", values: { warning_max: 70, critical_max: 80 } },
 ];
+
+/** Vorlagen fuer Metriken mit Nummer bzw. Pfad im Namen (Interfaces, weitere Laufwerke). */
+function patternPresets(metricOptions: string[]): Preset[] {
+  return metricOptions.flatMap((metric): Preset[] => {
+    // ifOperStatus: 1 = up, ab 2 (down, testing, ...) ist die Schnittstelle nicht in Betrieb
+    if (/^if\d+_oper_status$/.test(metric)) {
+      return [{ label: `${metricInfo(metric).label}: aus`, metric, values: { critical_max: 2 } }];
+    }
+    if (/^disk_.+_pct$/.test(metric)) {
+      return [{ label: metricInfo(metric).label, metric, values: { warning_max: 80, critical_max: 90 } }];
+    }
+    return [];
+  });
+}
 
 function toInput(value: number | null | undefined): string {
   return value === null || value === undefined ? "" : String(value);
@@ -43,7 +64,7 @@ export function ThresholdDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  function applyPreset(preset: (typeof PRESETS)[number]) {
+  function applyPreset(preset: Preset) {
     setMetric(preset.metric);
     setValues({
       warning_max: toInput(preset.values.warning_max),
@@ -100,7 +121,10 @@ export function ThresholdDialog({
 
   const unit = metricInfo(metric).unit;
   // Nur Vorlagen fuer Metriken anbieten, die noch keinen Schwellenwert haben
-  const presets = PRESETS.filter((preset) => metricOptions.includes(preset.metric));
+  const presets = [
+    ...PRESETS.filter((preset) => metricOptions.includes(preset.metric)),
+    ...patternPresets(metricOptions),
+  ];
   const numberInput = (key: NumberField, label: string) => (
     <label className="field">
       <span>

@@ -137,8 +137,16 @@ geändertes `SEED_ADMIN_PASSWORD` ändert das bestehende Passwort nicht.
 
 Danach im Dashboard unter **Verwaltung** zuerst die VLANs, dann die Geräte
 anlegen (IP-Adresse, VLAN, für Switch/Router SNMP-Community und Interface-Indizes,
-für NAS/Webserver optional ein Agent-Token). Auf der Detailseite eines Geräts
-lassen sich Schwellenwerte anlegen, z. B. mit der Vorlage „Offline-Alarm“.
+für NAS/Webserver optional ein Agent-Token). Ein Gerät an einem Trunk-Port (z. B.
+der Router) bekommt ein natives VLAN, mehrere getaggte VLANs und je getaggtem VLAN
+optional seine Adresse dort (beim Router das Gateway). Die Übersicht zeigt es in
+jeder VLAN-Karte mit dieser Adresse; angepingt wird die Haupt-IP. Auf der
+Detailseite eines Geräts lassen sich Schwellenwerte anlegen, z. B. mit der Vorlage
+„Offline-Alarm“.
+
+Kommen vom Collector oder einem Agenten länger als `STALE_AFTER_SECONDS` (Standard
+180) keine neuen Werte, zeigt die Übersicht „Veraltet“ statt online/offline und einen
+Hinweis, was zu prüfen ist.
 
 ## Tests
 
@@ -150,27 +158,32 @@ PYTHONPATH=.. .venv/bin/pytest
 
 Die Tests laufen gegen eine temporäre SQLite-Datenbank (kein PostgreSQL nötig)
 und decken Anmeldung, Pflicht-Passwortwechsel, „Passwort vergessen“, Einmal-Passwörter,
-Benutzerverwaltung, VLAN-/Geräte-/Schwellenwert-Verwaltung, den Alarm-Ablauf über den
-Collector-Endpunkt und das automatische Ergänzen neuer Spalten in alten Datenbanken ab.
+Benutzerverwaltung, VLAN-/Geräte-/Schwellenwert-Verwaltung inkl. Adressen pro VLAN,
+den Alarm-Ablauf über den Collector-Endpunkt, die Erkennung veralteter Daten, den
+Agent-Endpunkt und das automatische Ergänzen neuer Spalten in alten Datenbanken ab.
 E-Mails werden in den Tests abgefangen statt verschickt.
 
 ## Installation im Homelab
 
 Für den produktiven Betrieb (Backend + Frontend auf dem Webserver, Datenbank auf
 der NAS, Collector auf dem Router-Pi) gibt es Installationsskripte, die auch als
-Update dienen: `deploy/webserver/install.sh` und `deploy/pi/install-collector.sh`.
+Update dienen: `deploy/webserver/install.sh`, `deploy/pi/install-collector.sh` und
+für die Agenten `deploy/agent/install-agent.sh`.
 Schritt-für-Schritt-Anleitung: [`docs/deployment.md`](docs/deployment.md).
 
-## Eigener Agent (Beispiel für NAS/Webserver)
+## Agent (CPU, Arbeitsspeicher, Festplatte, Temperatur)
 
-Für Kennzahlen, die SNMP nicht hergibt (z. B. Festplattenbelegung, CPU-Last),
-kann ein einfaches Skript auf dem Zielsystem laufen, das regelmäßig postet:
+Was Ping und SNMP nicht liefern, schickt ein kleiner Agent vom Gerät selbst:
+[`agent/monitoring-agent.sh`](agent/monitoring-agent.sh) braucht nur bash, awk, df
+und curl und sendet `cpu_pct`, `mem_pct`, `disk_pct` (weitere Laufwerke als z. B.
+`disk_mnt_storage_pct`) und, wo vorhanden, `temp_c` an `POST /agent/push`.
 
-```bash
-curl -X POST http://<backend>:8000/agent/push \
-  -H "Content-Type: application/json" \
-  -d '{"agent_token": "<token aus Geräte-Config>", "metrics": {"cpu_pct": 12.5, "disk_pct": 63.0}}'
-```
+1. Im Dashboard beim Gerät „Agent darf Messwerte senden“ anhaken, Token generieren.
+2. Auf dem Gerät: `sudo ./deploy/agent/install-agent.sh` – fragt Backend-Adresse,
+   Token, Laufwerke und Intervall ab, sendet einmal zur Probe und richtet einen
+   systemd-Timer ein (Details: [`docs/deployment.md`](docs/deployment.md), Abschnitt 3).
+
+`./agent/monitoring-agent.sh --print` zeigt die Werte an, ohne etwas zu senden.
 
 ## Netzwerk-/Sicherheitsvoraussetzungen
 
@@ -196,6 +209,10 @@ Geräte es unterstützen.
   noch nicht implementiert.
 - Keine automatische Downsampling-/Retention-Policy für `metric_samples` –
   für den Dauerbetrieb sollte ein Cron-Job alte Rohdaten aggregieren/löschen.
+- Der Collector fragt die Geräte nacheinander ab (Ping mit 5 Paketen, ca. 4–6 s
+  pro Gerät). Ab etwa 7 Geräten dauert eine Runde länger als 30 s; bei sehr vielen
+  Geräten `STALE_AFTER_SECONDS` erhöhen. SNMP fragt er nur bei den Typen Switch
+  und Router ab, immer als v2c.
 
 ## Nächste Schritte
 
