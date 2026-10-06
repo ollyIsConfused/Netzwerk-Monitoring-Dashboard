@@ -1,5 +1,5 @@
 import { FormEvent, useRef, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router";
 import { apiErrorMessage } from "../api/client";
 import { useAuth } from "../api/AuthContext";
 import { HoneypotField } from "../components/HoneypotField";
