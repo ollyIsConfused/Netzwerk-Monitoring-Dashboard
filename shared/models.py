@@ -117,6 +117,12 @@ class Device(Base):
     snmp_version = Column(String(8), default="2c", nullable=False)  # "1", "2c", "3"
     snmp_port = Column(Integer, default=161, nullable=False)
     snmp_interfaces = Column(String(255), nullable=True)  # comma-separated ifIndex list, e.g. "1,2,3"
+    # SNMP v3 (statt Community): Benutzer, Anmeldung und optional Verschluesselung
+    snmp_v3_user = Column(String(32), nullable=True)
+    snmp_v3_auth_protocol = Column(String(8), nullable=True)  # md5, sha, sha224 ... sha512
+    snmp_v3_auth_password = Column(String(64), nullable=True)
+    snmp_v3_priv_protocol = Column(String(8), nullable=True)  # des, aes; leer = nur Anmeldung
+    snmp_v3_priv_password = Column(String(64), nullable=True)
 
     # Custom agent configuration (optional - for NAS/webserver push metrics)
     agent_enabled = Column(Boolean, default=False, nullable=False)

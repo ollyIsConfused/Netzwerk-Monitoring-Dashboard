@@ -9,6 +9,9 @@ import {
   DEVICE_TYPE_LABELS,
   describeDeviceVlans,
   PortMode,
+  SNMP_AUTH_PROTOCOLS,
+  SNMP_PRIV_PROTOCOLS,
+  SnmpVersion,
   Vlan,
 } from "../../api/client";
 import { Icon } from "../../components/Icon";
@@ -27,9 +30,15 @@ interface DeviceForm {
   is_active: boolean;
   snmp_enabled: boolean;
   snmp_community: string;
-  snmp_version: string;
+  snmp_version: SnmpVersion;
   snmp_port: string;
   snmp_interfaces: string;
+  snmp_v3_user: string;
+  snmp_v3_auth_protocol: string;
+  snmp_v3_auth_password: string;
+  /** Leer = keine Verschluesselung, nur Anmeldung */
+  snmp_v3_priv_protocol: string;
+  snmp_v3_priv_password: string;
   agent_enabled: boolean;
   agent_token: string;
 }
@@ -45,12 +54,21 @@ const EMPTY_FORM: DeviceForm = {
   is_active: true,
   snmp_enabled: false,
   snmp_community: "",
-  snmp_version: "2c",
+  // Neue Geraete: v3 vorgeschlagen, v1/v2c bleiben waehlbar
+  snmp_version: "3",
   snmp_port: "161",
   snmp_interfaces: "",
+  snmp_v3_user: "",
+  snmp_v3_auth_protocol: "sha",
+  snmp_v3_auth_password: "",
+  snmp_v3_priv_protocol: "aes",
+  snmp_v3_priv_password: "",
   agent_enabled: false,
   agent_token: "",
 };
+
+// Mindestlaenge fuer SNMP-v3-Passwoerter (RFC 3414), wie im Backend
+const SNMP_V3_MIN_PASSWORD = 8;
 
 function randomToken(): string {
   const bytes = new Uint8Array(24);
@@ -94,6 +112,12 @@ function DeviceDialog({
           snmp_version: data.snmp_version,
           snmp_port: String(data.snmp_port),
           snmp_interfaces: data.snmp_interfaces ?? "",
+          snmp_v3_user: data.snmp_v3_user ?? "",
+          snmp_v3_auth_protocol: data.snmp_v3_auth_protocol ?? "sha",
+          snmp_v3_auth_password: data.snmp_v3_auth_password ?? "",
+          // Gespeichertes v3-Geraet ohne Verfahren = bewusst ohne Verschluesselung
+          snmp_v3_priv_protocol: data.snmp_v3_priv_protocol ?? (data.snmp_v3_user ? "" : "aes"),
+          snmp_v3_priv_password: data.snmp_v3_priv_password ?? "",
           agent_enabled: data.agent_enabled,
           agent_token: data.agent_token ?? "",
         });
@@ -129,6 +153,8 @@ function DeviceDialog({
   }
 
   const isTrunk = form.port_mode === "trunk";
+  const isV3 = form.snmp_version === "3";
+  const [showSecrets, setShowSecrets] = useState(false);
   const taggedVlans = vlans.filter((vlan) => form.tagged_vlan_ids.includes(vlan.id));
 
   async function submit(event: FormEvent) {
@@ -137,9 +163,23 @@ function DeviceDialog({
       setError("Wähle mindestens ein getaggtes VLAN - mit nur einem VLAN ist es ein Access-Port.");
       return;
     }
-    if (form.snmp_enabled && !form.snmp_community.trim()) {
-      setError("Für SNMP wird eine Community benötigt.");
+    if (form.snmp_enabled && !isV3 && !form.snmp_community.trim()) {
+      setError("Für SNMP v1/v2c wird eine Community benötigt.");
       return;
+    }
+    if (form.snmp_enabled && isV3) {
+      if (!form.snmp_v3_user.trim()) {
+        setError("SNMP v3: Benutzername fehlt (genau wie am Gerät, Groß-/Kleinschreibung zählt).");
+        return;
+      }
+      if (form.snmp_v3_auth_password.trim().length < SNMP_V3_MIN_PASSWORD) {
+        setError(`SNMP v3: Das Auth-Passwort braucht mindestens ${SNMP_V3_MIN_PASSWORD} Zeichen.`);
+        return;
+      }
+      if (form.snmp_v3_priv_protocol && form.snmp_v3_priv_password.trim().length < SNMP_V3_MIN_PASSWORD) {
+        setError(`SNMP v3: Das Privacy-Passwort braucht mindestens ${SNMP_V3_MIN_PASSWORD} Zeichen.`);
+        return;
+      }
     }
     if (form.agent_enabled && form.agent_token.trim().length < 16) {
       setError("Das Agent-Token muss mindestens 16 Zeichen haben - am besten „Generieren“ nutzen.");
@@ -161,10 +201,16 @@ function DeviceDialog({
         : [],
       is_active: form.is_active,
       snmp_enabled: form.snmp_enabled,
-      snmp_community: form.snmp_community.trim() || null,
+      // Nicht genutzte Zugangsdaten nicht weiter speichern
+      snmp_community: isV3 ? null : form.snmp_community.trim() || null,
       snmp_version: form.snmp_version,
       snmp_port: Number(form.snmp_port) || 161,
       snmp_interfaces: form.snmp_interfaces.trim() || null,
+      snmp_v3_user: isV3 ? form.snmp_v3_user.trim() || null : null,
+      snmp_v3_auth_protocol: isV3 ? form.snmp_v3_auth_protocol : null,
+      snmp_v3_auth_password: isV3 ? form.snmp_v3_auth_password || null : null,
+      snmp_v3_priv_protocol: isV3 ? form.snmp_v3_priv_protocol || null : null,
+      snmp_v3_priv_password: isV3 && form.snmp_v3_priv_protocol ? form.snmp_v3_priv_password || null : null,
       agent_enabled: form.agent_enabled,
       agent_token: form.agent_token.trim() || null,
     };
@@ -306,23 +352,15 @@ function DeviceDialog({
             {form.snmp_enabled && (
               <div className="form-grid">
                 <label className="field">
-                  <span>Community</span>
-                  <input
-                    className="input"
-                    value={form.snmp_community}
-                    onChange={(e) => set("snmp_community", e.target.value)}
-                    autoComplete="off"
-                  />
-                </label>
-                <label className="field">
                   <span>Version</span>
                   <select
                     className="select"
                     value={form.snmp_version}
-                    onChange={(e) => set("snmp_version", e.target.value)}
+                    onChange={(e) => set("snmp_version", e.target.value as SnmpVersion)}
                   >
-                    <option value="1">v1</option>
-                    <option value="2c">v2c</option>
+                    <option value="3">v3 (empfohlen)</option>
+                    <option value="2c">v2c (Community)</option>
+                    <option value="1">v1 (Community)</option>
                   </select>
                 </label>
                 <label className="field">
@@ -336,7 +374,95 @@ function DeviceDialog({
                     onChange={(e) => set("snmp_port", e.target.value)}
                   />
                 </label>
-                <label className="field">
+                {!isV3 && (
+                  <label className="field span-2">
+                    <span>Community</span>
+                    <input
+                      className="input"
+                      type={showSecrets ? "text" : "password"}
+                      value={form.snmp_community}
+                      onChange={(e) => set("snmp_community", e.target.value)}
+                      autoComplete="off"
+                    />
+                  </label>
+                )}
+                {isV3 && (
+                  <>
+                    <label className="field">
+                      <span>Benutzer</span>
+                      <input
+                        className="input"
+                        value={form.snmp_v3_user}
+                        onChange={(e) => set("snmp_v3_user", e.target.value)}
+                        autoComplete="off"
+                        maxLength={32}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Anmeldung (Auth)</span>
+                      <select
+                        className="select"
+                        value={form.snmp_v3_auth_protocol}
+                        onChange={(e) => set("snmp_v3_auth_protocol", e.target.value)}
+                      >
+                        {Object.entries(SNMP_AUTH_PROTOCOLS).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field span-2">
+                      <span>Auth-Passwort</span>
+                      <input
+                        className="input"
+                        type={showSecrets ? "text" : "password"}
+                        value={form.snmp_v3_auth_password}
+                        onChange={(e) => set("snmp_v3_auth_password", e.target.value)}
+                        autoComplete="new-password"
+                        maxLength={64}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Verschlüsselung (Privacy)</span>
+                      <select
+                        className="select"
+                        value={form.snmp_v3_priv_protocol}
+                        onChange={(e) => set("snmp_v3_priv_protocol", e.target.value)}
+                      >
+                        {Object.entries(SNMP_PRIV_PROTOCOLS).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {form.snmp_v3_priv_protocol ? (
+                      <label className="field">
+                        <span>Privacy-Passwort</span>
+                        <input
+                          className="input"
+                          type={showSecrets ? "text" : "password"}
+                          value={form.snmp_v3_priv_password}
+                          onChange={(e) => set("snmp_v3_priv_password", e.target.value)}
+                          autoComplete="new-password"
+                          maxLength={64}
+                        />
+                      </label>
+                    ) : (
+                      <div className="field" />
+                    )}
+                    <small className="span-2 field-hint">
+                      Genau dieselben Werte wie am Gerät eintragen (TP-Link: SNMP → SNMP v3 → User Config). DES
+                      nur, wenn das Gerät kein AES kann - der TL-SG3210 zum Beispiel bietet nur SHA und DES.
+                    </small>
+                  </>
+                )}
+                <label className="checkbox span-2">
+                  <input type="checkbox" checked={showSecrets} onChange={(e) => setShowSecrets(e.target.checked)} />
+                  {isV3 ? "Passwörter anzeigen" : "Community anzeigen"}
+                </label>
+                <label className="field span-2">
                   <span>Interface-Indizes</span>
                   <input
                     className="input mono"
@@ -344,6 +470,7 @@ function DeviceDialog({
                     onChange={(e) => set("snmp_interfaces", e.target.value)}
                     placeholder="1,2,3"
                   />
+                  <small>Nummern aus snmpwalk, durch Komma getrennt (siehe Anleitung, Abschnitt 2.3).</small>
                 </label>
               </div>
             )}
@@ -478,7 +605,13 @@ export function DevicesAdminPage() {
                       {describeDeviceVlans(device, vlans)}
                     </td>
                     <td className="muted">
-                      {["Ping", device.snmp_enabled && "SNMP", device.agent_enabled && "Agent"].filter(Boolean).join(" · ")}
+                      {[
+                        "Ping",
+                        device.snmp_enabled && (device.snmp_version === "3" ? "SNMP v3" : "SNMP"),
+                        device.agent_enabled && "Agent",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </td>
                     <td className="actions">
                       <button

@@ -44,6 +44,34 @@ def _ensure_vlan_exists(db: Session, vlan_id: int | None) -> None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dieses VLAN existiert nicht")
 
 
+SNMP_V3_MIN_PASSWORD_LENGTH = 8  # RFC 3414
+
+
+def _check_snmp(device: Device) -> None:
+    """SNMP v3 braucht Benutzer und Anmeldung; Verschluesselung nur mit eigenem Passwort."""
+    # Leere Eingaben gelten als "nicht gesetzt"
+    for field in ("snmp_v3_user", "snmp_v3_auth_password", "snmp_v3_priv_password"):
+        value = getattr(device, field)
+        if value is not None and not value.strip():
+            setattr(device, field, None)
+    if device.snmp_v3_user:
+        device.snmp_v3_user = device.snmp_v3_user.strip()
+    if not device.snmp_enabled or device.snmp_version != "3":
+        return
+
+    def reject(detail: str) -> None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"SNMP v3: {detail}")
+
+    if not device.snmp_v3_user:
+        reject("Benutzername fehlt")
+    if not device.snmp_v3_auth_protocol or not device.snmp_v3_auth_password:
+        reject("Anmeldeverfahren und Auth-Passwort angeben")
+    if len(device.snmp_v3_auth_password) < SNMP_V3_MIN_PASSWORD_LENGTH:
+        reject(f"Das Auth-Passwort braucht mindestens {SNMP_V3_MIN_PASSWORD_LENGTH} Zeichen")
+    if device.snmp_v3_priv_protocol and len(device.snmp_v3_priv_password or "") < SNMP_V3_MIN_PASSWORD_LENGTH:
+        reject(f"Das Privacy-Passwort braucht mindestens {SNMP_V3_MIN_PASSWORD_LENGTH} Zeichen")
+
+
 def _set_tagged_vlans(
     db: Session, device: Device, vlan_ids: list[int], addresses: list[VlanAddress] | None
 ) -> None:
@@ -118,6 +146,7 @@ def create_device(payload: DeviceCreate, db: Session = Depends(get_db)):
     _ensure_vlan_exists(db, payload.vlan_id)
     device = Device(**payload.model_dump(exclude={"tagged_vlan_ids", "vlan_addresses"}))
     _set_tagged_vlans(db, device, payload.tagged_vlan_ids, payload.vlan_addresses)
+    _check_snmp(device)
     db.add(device)
     db.commit()
     db.refresh(device)
@@ -161,6 +190,7 @@ def update_device(device_id: int, payload: DeviceUpdate, db: Session = Depends(g
     ):
         ids = tagged_vlan_ids if tagged_vlan_ids is not None else [link.vlan_id for link in device.tagged_vlan_links]
         _set_tagged_vlans(db, device, ids, payload.vlan_addresses)
+    _check_snmp(device)
     db.commit()
     db.refresh(device)
     return device

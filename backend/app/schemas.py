@@ -44,6 +44,9 @@ def _validate_email(value: str) -> str:
 HostStr = Annotated[str, AfterValidator(_validate_host)]
 IpStr = Annotated[str, AfterValidator(_validate_ip)]
 PortMode = Literal["access", "trunk"]
+SnmpVersion = Literal["1", "2c", "3"]
+SnmpAuthProtocol = Literal["md5", "sha", "sha224", "sha256", "sha384", "sha512"]
+SnmpPrivProtocol = Literal["des", "aes"]
 EmailStr = Annotated[str, AfterValidator(_validate_email)]
 
 
@@ -172,9 +175,15 @@ class DeviceCreate(BaseModel):
     is_active: bool = True
     snmp_enabled: bool = False
     snmp_community: Optional[str] = None
-    snmp_version: str = "2c"
+    snmp_version: SnmpVersion = "2c"
     snmp_port: int = Field(default=161, ge=1, le=65535)
     snmp_interfaces: Optional[str] = None
+    # Nur bei snmp_version "3"; ohne priv_protocol nur Anmeldung, keine Verschluesselung
+    snmp_v3_user: Optional[str] = Field(default=None, max_length=32)
+    snmp_v3_auth_protocol: Optional[SnmpAuthProtocol] = None
+    snmp_v3_auth_password: Optional[str] = Field(default=None, max_length=64)
+    snmp_v3_priv_protocol: Optional[SnmpPrivProtocol] = None
+    snmp_v3_priv_password: Optional[str] = Field(default=None, max_length=64)
     agent_enabled: bool = False
     agent_token: Optional[str] = None
 
@@ -190,9 +199,14 @@ class DeviceUpdate(BaseModel):
     is_active: Optional[bool] = None
     snmp_enabled: Optional[bool] = None
     snmp_community: Optional[str] = None
-    snmp_version: Optional[str] = None
+    snmp_version: Optional[SnmpVersion] = None
     snmp_port: Optional[int] = Field(default=None, ge=1, le=65535)
     snmp_interfaces: Optional[str] = None
+    snmp_v3_user: Optional[str] = Field(default=None, max_length=32)
+    snmp_v3_auth_protocol: Optional[SnmpAuthProtocol] = None
+    snmp_v3_auth_password: Optional[str] = Field(default=None, max_length=64)
+    snmp_v3_priv_protocol: Optional[SnmpPrivProtocol] = None
+    snmp_v3_priv_password: Optional[str] = Field(default=None, max_length=64)
     agent_enabled: Optional[bool] = None
     agent_token: Optional[str] = None
 
@@ -209,16 +223,22 @@ class DeviceOut(BaseModel):
     vlan_addresses: list[VlanAddress] = []
     is_active: bool
     snmp_enabled: bool
+    snmp_version: str = "2c"
     agent_enabled: bool
 
 
 class DeviceConfigOut(DeviceOut):
-    """Vollstaendige Geraetekonfiguration inkl. SNMP-Community/Agent-Token - nur fuer Admins."""
+    """Vollstaendige Geraetekonfiguration inkl. SNMP-Zugangsdaten/Agent-Token - nur fuer Admins."""
 
     snmp_community: Optional[str] = None
     snmp_version: str
     snmp_port: int
     snmp_interfaces: Optional[str] = None
+    snmp_v3_user: Optional[str] = None
+    snmp_v3_auth_protocol: Optional[str] = None
+    snmp_v3_auth_password: Optional[str] = None
+    snmp_v3_priv_protocol: Optional[str] = None
+    snmp_v3_priv_password: Optional[str] = None
     agent_token: Optional[str] = None
 
 
@@ -276,6 +296,11 @@ class CollectorDeviceOut(BaseModel):
     snmp_version: str
     snmp_port: int
     snmp_interfaces: Optional[str] = None
+    snmp_v3_user: Optional[str] = None
+    snmp_v3_auth_protocol: Optional[str] = None
+    snmp_v3_auth_password: Optional[str] = None
+    snmp_v3_priv_protocol: Optional[str] = None
+    snmp_v3_priv_password: Optional[str] = None
 
 
 class CollectorMetricIn(BaseModel):

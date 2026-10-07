@@ -156,7 +156,15 @@ cd backend
 PYTHONPATH=.. .venv/bin/pytest
 ```
 
-Die Tests laufen gegen eine temporäre SQLite-Datenbank (kein PostgreSQL nötig)
+Collector-Tests (SNMP-Zugangsdaten v1/v2c/v3, Python 3.9–3.11 wegen pysnmp 4.4):
+
+```bash
+python3.11 -m venv .venv-collector
+.venv-collector/bin/pip install -r collector/requirements.txt pytest
+PYTHONPATH=. .venv-collector/bin/pytest collector/tests
+```
+
+Die Backend-Tests laufen gegen eine temporäre SQLite-Datenbank (kein PostgreSQL nötig)
 und decken Anmeldung, Pflicht-Passwortwechsel, „Passwort vergessen“, Einmal-Passwörter,
 Benutzerverwaltung, VLAN-/Geräte-/Schwellenwert-Verwaltung inkl. Adressen pro VLAN,
 den Alarm-Ablauf über den Collector-Endpunkt, die Erkennung veralteter Daten, den
@@ -211,8 +219,8 @@ Geräte es unterstützen.
   für den Dauerbetrieb sollte ein Cron-Job alte Rohdaten aggregieren/löschen.
 - Der Collector fragt die Geräte nacheinander ab (Ping mit 5 Paketen, ca. 4–6 s
   pro Gerät). Ab etwa 7 Geräten dauert eine Runde länger als 30 s; bei sehr vielen
-  Geräten `STALE_AFTER_SECONDS` erhöhen. SNMP fragt er nur bei den Typen Switch
-  und Router ab, immer als v2c.
+  Geräten `STALE_AFTER_SECONDS` erhöhen. SNMP (v1, v2c oder v3) fragt er nur bei den
+  Typen Switch und Router ab.
 
 ## Nächste Schritte
 

@@ -1,4 +1,4 @@
-"""Collector: polls every active device (ping, and SNMP for switches/routers)
+"""Collector: polls every active device (ping, and SNMP v1/v2c/v3 for switches/routers)
 and pushes raw metric samples to the backend API over HTTPS.
 
 Intentionally has NO database access and NO dependency on shared/: it can run
@@ -12,14 +12,14 @@ Custom agents (NAS/Webserver) push their own metrics directly to the backend's
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from typing import Optional
 
 import requests
 
 from .ping_client import ping_host
-from .snmp_client import poll_interface_counters
+from .snmp_client import poll_interface_counters, snmp_auth
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("collector")
@@ -44,16 +44,26 @@ class CollectorDevice:
     ip_address: str
     device_type: str
     snmp_enabled: bool
-    snmp_community: Optional[str]
+    snmp_community: Optional[str] = field(repr=False)  # nie in Logs/Tracebacks
     snmp_version: str
     snmp_port: int
     snmp_interfaces: Optional[str]
+    # SNMP v3 (aeltere Backends liefern diese Felder nicht)
+    snmp_v3_user: Optional[str] = None
+    snmp_v3_auth_protocol: Optional[str] = None
+    snmp_v3_auth_password: Optional[str] = field(default=None, repr=False)
+    snmp_v3_priv_protocol: Optional[str] = None
+    snmp_v3_priv_password: Optional[str] = field(default=None, repr=False)
+
+
+_DEVICE_FIELDS = {item.name for item in fields(CollectorDevice)}
 
 
 def fetch_devices() -> list[CollectorDevice]:
     response = requests.get(f"{BACKEND_URL}/collector/devices", headers=_AUTH_HEADERS, timeout=HTTP_TIMEOUT_SECONDS)
     response.raise_for_status()
-    return [CollectorDevice(**item) for item in response.json()]
+    # Unbekannte Felder (neuere Backends) ignorieren statt abzustuerzen
+    return [CollectorDevice(**{k: v for k, v in item.items() if k in _DEVICE_FIELDS}) for item in response.json()]
 
 
 def push_metrics(samples: list[dict]) -> None:
@@ -109,7 +119,18 @@ def _record_bandwidth(device: CollectorDevice, raw_metric: str, bps_metric: str,
 
 
 def _poll_snmp(device: CollectorDevice, now: datetime) -> list[dict]:
-    if not device.snmp_enabled or not device.snmp_community:
+    if not device.snmp_enabled:
+        return []
+    auth = snmp_auth(
+        device.snmp_version,
+        device.snmp_community,
+        device.snmp_v3_user,
+        device.snmp_v3_auth_protocol,
+        device.snmp_v3_auth_password,
+        device.snmp_v3_priv_protocol,
+        device.snmp_v3_priv_password,
+    )
+    if auth is None:
         return []
 
     samples: list[dict] = []
@@ -121,7 +142,7 @@ def _poll_snmp(device: CollectorDevice, now: datetime) -> list[dict]:
         except ValueError:
             continue
 
-        counters = poll_interface_counters(device.ip_address, device.snmp_community, if_index, device.snmp_port)
+        counters = poll_interface_counters(device.ip_address, auth, if_index, device.snmp_port)
         if not counters:
             continue
 

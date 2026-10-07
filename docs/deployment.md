@@ -228,6 +228,11 @@ falschem Token oder blockiertem Port) und startet den systemd-Dienst
 Update: `git pull && sudo ./deploy/pi/install-collector.sh`
 Logs: `journalctl -u monitoring-collector -f`
 
+**Webserver und Collector immer zusammen aktualisieren.** Kommen neue Felder in der
+Geräte-Konfiguration hinzu (wie bei SNMP v3), stürzt ein älterer Collector daran ab. Die
+Übersicht zeigt dann „Veraltet“, bis auch der Collector aktualisiert ist. Collectors ab
+der Version mit SNMP v3 ignorieren unbekannte Felder.
+
 **Firewall:** Der Collector läuft auf dem Router-Pi selbst. ICMP/SNMP in die VLANs
 und die Verbindung zum Webserver sind ausgehender Verkehr des Routers und von
 den Weiterleitungsregeln (`ufw route`) nicht betroffen.
@@ -240,9 +245,10 @@ Alle 30 Sekunden (`POLL_INTERVAL_SECONDS`):
    (`GET /api/collector/devices`).
 2. Er pingt jedes Gerät 5-mal an. Daraus werden Erreichbarkeit, Paketverlust und
    Antwortzeit.
-3. Bei den Typen Switch und Router fragt er per SNMP v2c je eingetragenem
-   Interface-Index den Status (`ifOperStatus`) und die Byte-Zähler ab und berechnet
-   daraus die Bandbreite.
+3. Bei den Typen Switch und Router fragt er per SNMP (v1, v2c oder v3, je nach
+   Gerät) je eingetragenem Interface-Index den Status (`ifOperStatus`) und die
+   Byte-Zähler ab und berechnet daraus die Bandbreite. Die drei Werte einer
+   Schnittstelle holt er mit einer Anfrage.
 4. Er schickt alle Werte an das Backend (`POST /api/collector/metrics`). Speichern,
    Schwellenwerte prüfen, Alarme und Mails übernimmt das Backend. Der Collector selbst
    hat keinen Zugriff auf die Datenbank.
@@ -313,21 +319,25 @@ rocommunity <community> 192.168.178.66
 
 ```bash
 sudo systemctl restart snmpd
-snmpwalk -v2c -c <community> 192.168.178.66 IF-MIB::ifDescr
+snmpwalk -v2c -c <community> 192.168.178.66 1.3.6.1.2.1.2.2.1.2
 ```
 
-Die Ausgabe sieht etwa so aus (die Nummern unterscheiden sich je System):
+`1.3.6.1.2.1.2.2.1.2` ist die Adresse der Liste aller Schnittstellennamen (`ifDescr`).
+Den Namen `IF-MIB::ifDescr` versteht `snmpwalk` unter Debian/Raspberry Pi OS nur mit
+dem Zusatzpaket `snmp-mibs-downloader`, sonst kommt „Unknown Object Identifier“ – die
+Zahlenadresse funktioniert immer. Die Ausgabe sieht etwa so aus (die Nummern
+unterscheiden sich je System):
 
 ```
-IF-MIB::ifDescr.1 = STRING: lo
-IF-MIB::ifDescr.2 = STRING: eth0
-IF-MIB::ifDescr.5 = STRING: eth0.20
-IF-MIB::ifDescr.6 = STRING: eth0.30
-IF-MIB::ifDescr.7 = STRING: eth0.50
-IF-MIB::ifDescr.8 = STRING: wg0
+iso.3.6.1.2.1.2.2.1.2.1 = STRING: "lo"
+iso.3.6.1.2.1.2.2.1.2.2 = STRING: "eth0"
+iso.3.6.1.2.1.2.2.1.2.5 = STRING: "eth0.20"
+iso.3.6.1.2.1.2.2.1.2.6 = STRING: "eth0.30"
+iso.3.6.1.2.1.2.2.1.2.7 = STRING: "eth0.50"
+iso.3.6.1.2.1.2.2.1.2.8 = STRING: "wg0"
 ```
 
-Die Zahl nach `ifDescr.` ist der Interface-Index. Im Gerät unter SNMP eintragen:
+Die letzte Zahl der Adresse ist der Interface-Index. Im Gerät unter SNMP eintragen:
 Community, Version v2c, Port 161 und als Interface-Indizes z. B. `2,5,6,7,8`
 (`eth0`, die drei VLAN-Schnittstellen und das VPN). Danach zeigt die Detailseite
 pro Schnittstelle Status und Bandbreite – also auch pro VLAN-Gateway. Mit der
@@ -342,6 +352,78 @@ erlauben, in dem die Verwaltungsadresse des Geräts liegt (Tabelle in Abschnitt 
 Hat der Switch z. B. die Adresse `192.168.20.2`, kommt die Anfrage von
 `192.168.20.1`. Die Adresse des Webservers (`192.168.30.15`) ist dafür falsch – der
 Webserver fragt keine Geräte ab.
+
+### 2.5 SNMP v3 (z. B. TP-Link TL-SG3210)
+
+Bei v1/v2c steht die Community im Klartext in jedem Paket. SNMP v3 meldet sich
+stattdessen mit Benutzer und Passwort an, ohne das Passwort zu übertragen (Prüfsumme
+per SHA), schützt vor gefälschten und wiederholten Paketen und verschlüsselt die
+Werte (AES oder DES). Für Geräte, deren SNMP-Verkehr über das Netz läuft (Switch),
+ist das die richtige Wahl. Für den Router-Pi selbst reicht v2c, weil er sich lokal
+abfragt (Abschnitt 2.3).
+
+**Views verstehen:** Jeder SNMP-Wert hat eine Adresse im Baum, z. B.
+`1.3.6.1.2.1.2.2.1.10.<port>` = empfangene Bytes eines Ports. Eine *View* gibt Teile
+dieses Baums frei (*Include*) oder sperrt sie (*Exclude*, der genauere Eintrag gewinnt).
+Eine *Gruppe* nutzt Views zum Lesen (*Read View*), Ändern (*Write View*) und für
+Meldungen (*Notify View*); ein *Benutzer* gehört zu einer Gruppe.
+
+Am TL-SG3210 (Weboberfläche, Menü *SNMP*):
+
+1. **Global Config:** SNMP auf *Enable*, *Apply*. Die *Local Engine ID* nicht ändern –
+   aus ihr und den Passwörtern berechnet der Switch die Schlüssel der v3-Benutzer.
+2. **SNMP View:** `viewDefault` so lassen (Include `1`, Exclude `1.3.6.1.6.3.15`,
+   `.16`, `.18` – die Excludes verbergen Benutzer, Gruppen und Communities; nicht
+   löschen). Am saubersten zusätzlich eine View nur für das Monitoring, drei Zeilen
+   mit demselben Namen:
+
+   | View Name        | View Type | MIB Object ID     | Inhalt                          |
+   |------------------|-----------|-------------------|---------------------------------|
+   | `viewMonitoring` | Include   | `1.3.6.1.2.1.1`   | system (Name, Laufzeit)         |
+   | `viewMonitoring` | Include   | `1.3.6.1.2.1.2`   | interfaces (Status, Zähler)     |
+   | `viewMonitoring` | Include   | `1.3.6.1.2.1.31`  | ifMIB (Portnamen, 64-Bit-Zähler) |
+
+3. **SNMP Group:** Name `Monitoring`, Security Level **AuthPriv**, Read View
+   `viewMonitoring` (oder `viewDefault`), Write View und Notify View **leer** – keine
+   Schreibrechte.
+4. **SNMP User:** Name z. B. `Monitoring` (Groß-/Kleinschreibung zählt), *Local User*,
+   Gruppe `Monitoring`, **AuthPriv**, Authentication Mode **SHA**, Privacy Mode **DES**
+   (der TL-SG3210 bietet nur DES; wo AES angeboten wird, AES nehmen). Zwei verschiedene
+   Passwörter, z. B. `openssl rand -hex 16` (32 Zeichen, Auth) und `openssl rand -hex 8`
+   (16 Zeichen, Privacy – mehr erlaubt der Switch dort nicht).
+5. **v1/v2c-Communities** `public`/`private` löschen, falls vorhanden.
+6. Oben auf **Save**, sonst ist alles nach einem Neustart weg.
+
+Test vom Router-Pi aus (Werte einsetzen):
+
+```bash
+snmpwalk -v3 -l authPriv -u Monitoring -a SHA -A 'AUTH-PASSWORT' -x DES -X 'PRIV-PASSWORT' <switch-ip> 1.3.6.1.2.1.31.1.1.1.1
+```
+
+`1.3.6.1.2.1.31.1.1.1.1` ist die Liste der Portnamen (`ifName`). Die letzte Zahl jeder
+Zeile ist der Interface-Index (bei TP-Link oft große Zahlen wie `49153` für `1/0/1`).
+
+| Ausgabe | Bedeutung |
+|---|---|
+| `… = STRING: "1/0/1"` | passt |
+| `Authentication failure (incorrect password, community or key)` | Auth-Passwort oder SHA/MD5 passt nicht |
+| `Unknown user name` | Benutzername falsch (Groß-/Kleinschreibung) |
+| `Timeout: No Response` | SNMP aus, falsche IP, Zugriffsbeschränkung am Switch – oder Privacy-Passwort/Verfahren falsch (der Switch kann dann nicht entschlüsseln und antwortet gar nicht) |
+
+Im Dashboard beim Switch: *SNMP-Abfrage aktivieren*, Version **v3**, Benutzer,
+Anmeldung **SHA**, Auth-Passwort, Verschlüsselung **DES**, Privacy-Passwort, Port 161,
+Interface-Indizes aus dem Test. Dieselben Fehler wie in der Tabelle stehen bei
+Problemen auch im Collector-Log (`journalctl -u monitoring-collector -n 50`).
+
+Die Zugangsdaten liegen wie die Community im Klartext in der Datenbank (der Collector
+braucht sie im Klartext). Sichtbar sind sie nur für Admins im Bearbeiten-Dialog und für
+den Collector über dessen Token, nicht in den normalen Ansichten.
+
+Optional auch für den Router-Pi selbst: `sudo systemctl stop snmpd`, dann
+`sudo net-snmp-create-v3-user -ro -a SHA -A 'AUTH-PASSWORT' -x AES -X 'PRIV-PASSWORT' monitoring`
+(das Werkzeug gehört zum Paket `snmpd`), `sudo systemctl start snmpd` und im Dashboard
+v3 mit SHA/AES eintragen. Kommentierst du danach die `rocommunity`-Zeilen aus, ist v2c
+ganz abgeschaltet.
 
 ## 3. Agent auf den Servern (CPU, Arbeitsspeicher, Festplatte)
 
@@ -480,5 +562,6 @@ Heimnetz beschränken.
 - Jeder Agent hat ein eigenes Token; `/etc/monitoring-agent.env` ist nur für root
   lesbar. Für die Agenten von NAS und Pi-hole sind nur die beiden Regeln zum
   Webserver-Port freigegeben (Abschnitt 3.3).
-- SNMP nach Möglichkeit auf v3 (Auth+Privacy) umstellen, sobald die Geräte es
-  unterstützen – v2c überträgt die Community im Klartext.
+- SNMP auf Geräten, deren Verkehr über das Netz läuft (Switch), mit v3 und AuthPriv
+  (Abschnitt 2.5): Gruppe ohne Write View, eigene Read View nur für System und
+  Schnittstellen. v2c überträgt die Community im Klartext.
