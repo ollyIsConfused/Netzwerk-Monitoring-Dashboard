@@ -1,3 +1,5 @@
 requests==2.32.3
 pysnmp==4.4.12
 pyasn1==0.4.8
+# Verschluesselung fuer SNMP v3 (DES/AES); pysnmp zieht es sonst ohne feste Version nach
+pycryptodomex==3.24.0
