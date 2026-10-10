@@ -108,7 +108,7 @@ docker compose exec backend python -m app.seed
 ```
 
 - Frontend: http://localhost:5173 (erste Anmeldung `admin` / `admin`, danach eigenes Passwort festlegen)
-- Backend-API/Docs: http://localhost:8000/docs
+- Backend-API/Docs: http://localhost:8000/docs (nur in der Entwicklung, im Betrieb abgeschaltet)
 
 ### Alternative: Backend und Frontend direkt starten, nur die Datenbank in Docker
 
@@ -207,10 +207,11 @@ Geräte es unterstützen.
   Collector aus – unproblematisch, solange die Verbindung per TLS (HTTPS)
   läuft (siehe `docs/deployment.md`), aber **nicht** ohne TLS zwischen
   getrennten Hosts einsetzen.
-- Der WebSocket-Status-Kanal (`/ws/status`) ist nicht durch das JWT geschützt
-  (liefert nur aggregierte Status-Labels, keine sensiblen Werte) – für den
-  Produktivbetrieb sollte er zusätzlich abgesichert werden (z. B. Token-Check
-  beim Verbindungsaufbau oder Absicherung auf Netzwerkebene).
+- Die Anmeldung liegt als Token im `localStorage` des Browsers. Gegen
+  eingeschleuste Skripte schützt die Content-Security-Policy von nginx (nur Skripte
+  von der eigenen Adresse); ein HttpOnly-Cookie wäre noch etwas sicherer.
+- Die Login-Bremse zählt Fehlversuche im Speicher des Backends, nach einem Neustart
+  beginnt sie von vorn.
 - SNMP-Zähler-Overflow (32-Bit-Wraparound) wird erkannt und das betroffene
   Intervall übersprungen statt eine falsche Bandbreitenspitze zu melden;
   64-Bit-Zähler (`ifHCInOctets`/`ifHCOutOctets`) sind für High-Speed-Interfaces

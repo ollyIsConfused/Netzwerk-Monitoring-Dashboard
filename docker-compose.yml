@@ -24,6 +24,8 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-monitoring}:${POSTGRES_PASSWORD:-monitoring}@db:5432/${POSTGRES_DB:-monitoring}
+      # Lokale Entwicklungsumgebung: API-Beschreibung unter http://localhost:8000/docs
+      ENABLE_API_DOCS: "1"
     depends_on:
       db:
         condition: service_healthy

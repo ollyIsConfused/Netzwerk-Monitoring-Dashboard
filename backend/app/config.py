@@ -19,3 +19,14 @@ ADMIN_NOTIFY_EMAIL = os.environ.get("ADMIN_NOTIFY_EMAIL", "")
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "").rstrip("/")
 # Mindestabstand zwischen zwei "Passwort vergessen"-Mails fuer dasselbe Konto
 PASSWORD_RESET_COOLDOWN_MINUTES = int(os.environ.get("PASSWORD_RESET_COOLDOWN_MINUTES", "15"))
+
+# Bremse gegen Passwort-Raten: nach so vielen Fehlversuchen von einer IP-Adresse ist die
+# Anmeldung fuer LOGIN_BLOCK_SECONDS gesperrt (pro Benutzername gilt das Doppelte)
+LOGIN_MAX_FAILURES = int(os.environ.get("LOGIN_MAX_FAILURES", "5"))
+LOGIN_BLOCK_SECONDS = int(os.environ.get("LOGIN_BLOCK_SECONDS", "300"))
+
+# API-Beschreibung unter /docs und /openapi.json - im Betrieb aus, beim Entwickeln an
+ENABLE_API_DOCS = os.environ.get("ENABLE_API_DOCS", "").strip().lower() in ("1", "true", "yes", "ja")
+# Nur noetig, wenn das Frontend von einer anderen Adresse kommt als die API (mehrere mit
+# Komma). Leer = kein CORS: Frontend und API laufen ueber denselben nginx.
+CORS_ORIGINS = [origin.strip() for origin in os.environ.get("CORS_ORIGINS", "").split(",") if origin.strip()]

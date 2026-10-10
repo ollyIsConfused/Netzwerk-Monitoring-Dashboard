@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -11,6 +11,7 @@ from shared.models import User
 from ..account_mails import admin_recipients, notify_password_reset_request
 from ..config import PASSWORD_RESET_COOLDOWN_MINUTES
 from ..deps import get_db
+from ..login_limiter import client_ip, login_keys, login_limiter
 from ..schemas import ForgotPasswordRequest, PasswordChange, Token, UserOut
 from ..security import create_access_token, get_authenticated_user, set_user_password, verify_password
 
@@ -36,20 +37,36 @@ LOGIN_FAILED = "Benutzername oder Passwort falsch"
 
 @router.post("/login", response_model=Token)
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     # Lockfeld (Honeypot): im Anmeldeformular unsichtbar. Menschen lassen es leer, einfache
     # Bots fuellen jedes Feld aus - die bekommen dieselbe Antwort wie bei falschem Passwort.
     email: str = Form(default=""),
     db: Session = Depends(get_db),
 ):
+    keys = login_keys(request, form_data.username)
+    wait = login_limiter.retry_after(keys)
+    if wait:
+        logger.warning("Anmeldung gesperrt (zu viele Fehlversuche): Benutzername %r, Adresse %s",
+                       form_data.username, client_ip(request))
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Zu viele Fehlversuche. Bitte in {max(1, round(wait / 60))} Minute(n) erneut versuchen.",
+            headers={"Retry-After": str(wait)},
+        )
+
     if email:
         logger.warning("Anmeldung abgewiesen: unsichtbares Feld ausgefüllt (vermutlich Bot), Benutzername %r",
                        form_data.username)
+        login_limiter.record_failure(keys)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=LOGIN_FAILED)
 
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not user.is_active or not verify_password(form_data.password, user.hashed_password):
+        login_limiter.record_failure(keys)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=LOGIN_FAILED)
+    # Erfolgreich: Fehlversuche fuer dieses Konto vergessen (die der Adresse bleiben stehen)
+    login_limiter.reset([key for key in keys if key[0] == "user"])
     return _token_response(user)
 
 
