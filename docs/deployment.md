@@ -248,7 +248,7 @@ Alle 30 Sekunden (`POLL_INTERVAL_SECONDS`):
    (`GET /api/collector/devices`).
 2. Er pingt jedes Gerät 5-mal an. Daraus werden Erreichbarkeit, Paketverlust und
    Antwortzeit.
-3. Bei den Typen Switch und Router fragt er per SNMP (v1, v2c oder v3, je nach
+3. Bei den Typen Switch, Router und Gateway fragt er per SNMP (v1, v2c oder v3, je nach
    Gerät) je eingetragenem Interface-Index den Status (`ifOperStatus`) und die
    Byte-Zähler ab und berechnet daraus die Bandbreite. Die drei Werte einer
    Schnittstelle holt er mit einer Anfrage.

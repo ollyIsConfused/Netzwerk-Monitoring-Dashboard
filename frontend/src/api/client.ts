@@ -105,14 +105,27 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   viewer: "Betrachter",
 };
 
-export type DeviceType = "switch" | "router" | "dns_server" | "webserver" | "nas" | "other";
+export type DeviceType =
+  | "switch"
+  | "router"
+  | "gateway"
+  | "dns_server"
+  | "dhcp_server"
+  | "webserver"
+  | "nas"
+  | "workstation"
+  | "other";
 
+// Reihenfolge = Reihenfolge in der Auswahl beim Anlegen
 export const DEVICE_TYPE_LABELS: Record<DeviceType, string> = {
   switch: "Switch",
   router: "Router",
+  gateway: "Gateway",
   dns_server: "DNS-Server",
+  dhcp_server: "DHCP-Server",
   webserver: "Webserver",
   nas: "NAS",
+  workstation: "Workstation",
   other: "Sonstiges",
 };
 
