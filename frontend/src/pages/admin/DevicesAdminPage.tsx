@@ -340,7 +340,7 @@ function DeviceDialog({
           </div>
 
           <fieldset className="fieldset">
-            <legend>SNMP (Bandbreite von Switch/Router)</legend>
+            <legend>SNMP (Bandbreite von Switch/Router/Gateway)</legend>
             <label className="checkbox">
               <input
                 type="checkbox"

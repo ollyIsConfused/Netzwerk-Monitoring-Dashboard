@@ -1,4 +1,4 @@
-"""Collector: polls every active device (ping, and SNMP v1/v2c/v3 for switches/routers)
+"""Collector: polls every active device (ping, and SNMP v1/v2c/v3 for switches/routers/gateways)
 and pushes raw metric samples to the backend API over HTTPS.
 
 Intentionally has NO database access and NO dependency on shared/: it can run
@@ -30,6 +30,8 @@ POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 HTTP_TIMEOUT_SECONDS = int(os.environ.get("HTTP_TIMEOUT_SECONDS", "10"))
 
 _AUTH_HEADERS = {"Authorization": f"Bearer {COLLECTOR_API_TOKEN}"}
+# Nur bei diesen Geraetetypen fragt der Collector Schnittstellen-Zaehler per SNMP ab
+SNMP_DEVICE_TYPES = ("switch", "router", "gateway")
 
 # In-memory only: the collector is a single long-running process, so a plain
 # dict is enough to compute bandwidth deltas between polls. A restart loses at
@@ -175,7 +177,7 @@ def poll_once() -> None:
     for device in devices:
         try:
             samples.extend(_poll_ping(device, now))
-            if device.device_type in ("switch", "router"):
+            if device.device_type in SNMP_DEVICE_TYPES:
                 samples.extend(_poll_snmp(device, now))
         except Exception:
             logger.exception("Polling für Gerät %s (%s) fehlgeschlagen", device.name, device.ip_address)

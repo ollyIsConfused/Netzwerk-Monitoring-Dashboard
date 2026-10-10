@@ -194,3 +194,16 @@ def test_trunk_port_with_native_and_tagged_vlans(client, admin_headers):
     # Loeschen raeumt die Zuordnungen mit auf (Fremdschluessel)
     assert client.delete(f"/devices/{device['id']}", headers=admin_headers).status_code == 204
     assert client.delete(f"/vlans/{vlans[20]}", headers=admin_headers).status_code == 204
+
+
+def test_new_device_types(client, admin_headers):
+    for index, device_type in enumerate(("gateway", "dhcp_server", "workstation")):
+        response = client.post(
+            "/devices",
+            json={"name": f"geraet-{device_type}", "ip_address": f"192.168.30.{50 + index}", "device_type": device_type},
+            headers=admin_headers,
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["device_type"] == device_type
+    collector = client.get("/collector/devices", headers={"Authorization": "Bearer test-collector-token"}).json()
+    assert {"gateway", "dhcp_server", "workstation"} <= {device["device_type"] for device in collector}
