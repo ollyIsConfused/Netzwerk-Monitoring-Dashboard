@@ -36,6 +36,11 @@ class DeviceType(str, enum.Enum):
     webserver = "webserver"
     nas = "nas"
     other = "other"
+    # Spaeter dazugekommen - in bestehenden PostgreSQL-Datenbanken ergaenzt sie
+    # add_missing_enum_values() automatisch
+    gateway = "gateway"
+    dhcp_server = "dhcp_server"
+    workstation = "workstation"
 
 
 class MetricStatus(str, enum.Enum):

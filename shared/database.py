@@ -3,7 +3,7 @@ import logging
 import os
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import Enum, create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.schema import CreateColumn
@@ -59,9 +59,42 @@ def add_missing_columns(bind: Engine) -> list[str]:
     return added
 
 
+def add_missing_enum_values(bind: Engine) -> list[str]:
+    """PostgreSQL speichert Auswahlfelder (z. B. den Geraetetyp) als eigenen Datentyp mit
+    fester Werteliste. Neue Werte aus spaeteren Versionen werden hier ergaenzt - nur
+    hinzufuegen, nie loeschen. SQLite braucht das nicht. Gibt die ergaenzten Werte zurueck."""
+    if bind.dialect.name != "postgresql":
+        return []
+    enum_types = {}
+    for table in Base.metadata.sorted_tables:
+        for column in table.columns:
+            if isinstance(column.type, Enum) and column.type.native_enum and column.type.name:
+                enum_types[column.type.name] = column.type.enums
+    added = []
+    # ALTER TYPE ... ADD VALUE ausserhalb einer Transaktion, damit der Wert sofort nutzbar ist
+    with bind.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        for type_name, values in enum_types.items():
+            existing = set(conn.execute(
+                text("SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON e.enumtypid = t.oid "
+                     "WHERE t.typname = :name"),
+                {"name": type_name},
+            ).scalars())
+            if not existing:
+                continue  # Typ gibt es (noch) nicht - legt create_all vollstaendig an
+            for value in values:
+                if value not in existing:
+                    quoted = value.replace("'", "''")
+                    conn.execute(text(f"ALTER TYPE {type_name} ADD VALUE IF NOT EXISTS '{quoted}'"))
+                    added.append(f"{type_name}.{value}")
+    for name in added:
+        logger.warning("Datenbank aktualisiert: Auswahlwert %s ergänzt", name)
+    return added
+
+
 def init_db() -> None:
-    """Create all tables and add new columns. Safe to call repeatedly."""
+    """Create all tables, add new columns and enum values. Safe to call repeatedly."""
     from . import models  # noqa: F401  (ensures models are registered on Base)
 
     Base.metadata.create_all(bind=engine)
     add_missing_columns(engine)
+    add_missing_enum_values(engine)

@@ -1,7 +1,7 @@
 # Netzwerk-Monitoring-Dashboard
 
 Web-basiertes Monitoring-Dashboard für eine segmentierte VLAN-Infrastruktur
-(Switch, Router, DNS-Server, Webserver, NAS). Erfasst Erreichbarkeit,
+(Switch, Router, Gateway, DNS-/DHCP-Server, Webserver, NAS, Workstations). Erfasst Erreichbarkeit,
 Bandbreite, Paketverlust und Antwortzeiten je Gerät/VLAN, historisiert die
 Werte und löst bei Grenzwertüberschreitung automatisch eine E-Mail-Benachrichtigung
 aus. Rollenbasierte Weboberfläche (Admin / Operator / Viewer).
@@ -221,7 +221,7 @@ Geräte es unterstützen.
 - Der Collector fragt die Geräte nacheinander ab (Ping mit 5 Paketen, ca. 4–6 s
   pro Gerät). Ab etwa 7 Geräten dauert eine Runde länger als 30 s; bei sehr vielen
   Geräten `STALE_AFTER_SECONDS` erhöhen. SNMP (v1, v2c oder v3) fragt er nur bei den
-  Typen Switch und Router ab.
+  Typen Switch, Router und Gateway ab.
 
 ## Nächste Schritte
 
