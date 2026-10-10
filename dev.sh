@@ -34,6 +34,8 @@ fi
 
 set -a; source .env; set +a
 export PYTHONPATH="$PWD"
+# Beim Entwickeln die API-Beschreibung unter http://localhost:8000/docs einschalten
+export ENABLE_API_DOCS=1
 if [ -z "${DATABASE_URL:-}" ]; then
   # Ohne eigene DATABASE_URL: der Docker-Container "db" mit den POSTGRES_*-Werten aus .env
   DATABASE_URL="postgresql+psycopg2://$(url_encode "${POSTGRES_USER:-monitoring}"):$(url_encode "${POSTGRES_PASSWORD:-monitoring}")@localhost:5432/${POSTGRES_DB:-monitoring}"

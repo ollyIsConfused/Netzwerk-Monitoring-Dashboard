@@ -197,12 +197,13 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    // Hinweis: der WebSocket-Endpunkt liefert nur aggregierte Status-Werte (kein JWT-Schutz in
-    // diesem MVP) - siehe README, Abschnitt "Bekannte Einschränkungen" für die Produktivhärtung.
     // VITE_WS_BASE_URL analog zu VITE_API_BASE_URL für Deployments ohne gemeinsamen Reverse-Proxy.
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsBase = import.meta.env.VITE_WS_BASE_URL || `${protocol}//${window.location.host}/ws`;
     const socket = new WebSocket(`${wsBase}/status`);
+    // Anmeldung als erste Nachricht (Browser können beim WebSocket keinen Header setzen,
+    // und in der URL würde das Token in den Server-Logs landen)
+    socket.onopen = () => socket.send(JSON.stringify({ type: "auth", token: localStorage.getItem("token") }));
 
     socket.onmessage = (event) => {
       try {

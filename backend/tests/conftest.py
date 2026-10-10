@@ -19,6 +19,7 @@ from sqlalchemy import event  # noqa: E402
 from shared.database import Base, SessionLocal, engine  # noqa: E402
 from shared.models import User, UserRole  # noqa: E402
 
+from app.login_limiter import login_limiter  # noqa: E402
 from app.main import app  # noqa: E402
 from app.security import hash_password  # noqa: E402
 
@@ -43,6 +44,7 @@ def fresh_db():
                 role=UserRole.admin))
     db.commit()
     db.close()
+    login_limiter.reset()  # Fehlversuche aus vorherigen Tests vergessen
     yield
 
 

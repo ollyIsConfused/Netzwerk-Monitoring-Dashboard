@@ -157,8 +157,11 @@ Einmalig, damit pm2 nach einem Neustart automatisch startet: `pm2 startup`
 ```bash
 cd /opt/monitoring
 git pull
-./deploy/webserver/install.sh
+./deploy/webserver/install.sh --nginx
 ```
+
+`--nginx` übernimmt auch Änderungen an der nginx-Site, z. B. neue Sicherheits-Header
+(Abschnitt 4.1). Ohne den Schalter fragt das Skript nach.
 
 ### 1.4 Erste Anmeldung und Passwörter
 
@@ -525,6 +528,35 @@ ein einziges `reverse_proxy <webserver-ip>:8080` – nginx auf dem Webserver
 verteilt `/api` und `/ws` bereits selbst. Dann den Zugriff unbedingt auf VPN und
 Heimnetz beschränken.
 
+### 4.1 Schutz, wenn das Dashboard öffentlich erreichbar ist
+
+Läuft das Dashboard über Cloudflare und Caddy im Internet, greifen diese Schutzmaßnahmen
+ohne weitere Einstellung:
+
+- **Sicherheits-Header** von nginx: Content-Security-Policy (Skripte und Verbindungen
+  nur von der eigenen Adresse), HSTS, `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, Referrer-Policy. Prüfen:
+  `curl -sI https://<deine-domain>/ | grep -iE 'content-security|strict-transport|x-frame'`
+- **Login-Bremse:** Nach 5 Fehlversuchen von einer Adresse ist die Anmeldung dort für
+  5 Minuten gesperrt, nach 10 Fehlversuchen für einen Benutzernamen ebenso (von jeder
+  Adresse aus). Die Besucher-Adresse kommt aus dem Header `CF-Connecting-IP`, den
+  Cloudflare setzt und Caddy weiterreicht. Einstellbar in `.env` mit
+  `LOGIN_MAX_FAILURES` und `LOGIN_BLOCK_SECONDS`.
+- **Live-Status (`/ws/status`) nur nach Anmeldung:** Das Frontend schickt das Token als
+  erste Nachricht. Ohne gültiges Token beendet der Server die Verbindung, ebenso wenn
+  die Anmeldung abläuft oder das Passwort geändert wird.
+- **Keine API-Beschreibung:** `/api/docs` und `/api/openapi.json` sind abgeschaltet
+  (`ENABLE_API_DOCS=1` in `.env` schaltet sie wieder ein, z. B. zum Entwickeln).
+- **Kein CORS:** Andere Webseiten dürfen die API nicht aus dem Browser heraus
+  aufrufen. Nur wenn das Frontend unter einer anderen Adresse läuft als die API,
+  diese in `CORS_ORIGINS` eintragen.
+
+Den stärksten Schutz bietet zusätzlich **Cloudflare Access** (kostenlos bis 50
+Benutzer, *Zero Trust > Access > Applications*): Dann sieht nur, wer sich vorher bei
+Cloudflare ausgewiesen hat (z. B. per Code an die eigene E-Mail-Adresse), überhaupt
+die Anmeldeseite. Der Collector und die Agenten sind davon nicht betroffen, sie
+sprechen den Webserver im Heimnetz direkt an.
+
 ## 5. Testen
 
 1. Vom Webserver aus die DB-Verbindung prüfen: `psql -h <nas-ip> -U monitoring -d monitoring`
@@ -556,7 +588,9 @@ Heimnetz beschränken.
   auf der SD-Karte (Abschnitt 0.2), und wird regelmäßig per `pg_dump` gesichert
   (Abschnitt 0.5).
 - Das Dashboard ist nur per VPN bzw. aus dem Heimnetz erreichbar (Abschnitt 4),
-  das Backend lauscht nur auf `127.0.0.1`.
+  das Backend lauscht nur auf `127.0.0.1`. Ist es doch öffentlich: nginx-Site mit
+  `install.sh --nginx` aktuell (Sicherheits-Header), `ENABLE_API_DOCS` nicht gesetzt,
+  am besten Cloudflare Access davor (Abschnitt 4.1).
 - snmpd auf dem Router-Pi nutzt eine eigene Community, nicht `public`, und erlaubt
   nur die eigenen Adressen (Abschnitt 2.3); Port 161 ist von außen nicht freigegeben.
 - Jeder Agent hat ein eigenes Token; `/etc/monitoring-agent.env` ist nur für root

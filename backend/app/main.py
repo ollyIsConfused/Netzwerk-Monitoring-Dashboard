@@ -6,18 +6,27 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from shared.database import init_db
 
+from .config import CORS_ORIGINS, ENABLE_API_DOCS
 from .notifications import dispatch_alert_emails_loop
 from .routers import alerts, auth, collector, devices, metrics, users, vlans, ws
 
-app = FastAPI(title="Netzwerk-Monitoring-Dashboard API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # eingeschränkt im Produktivbetrieb über Reverse-Proxy/CORS-Config
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Die API-Beschreibung verraet alle Endpunkte - im Betrieb nur mit ENABLE_API_DOCS=1
+app = FastAPI(
+    title="Netzwerk-Monitoring-Dashboard API",
+    docs_url="/docs" if ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if ENABLE_API_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_API_DOCS else None,
 )
+
+if CORS_ORIGINS:
+    # Die Anmeldung laeuft ueber den Authorization-Header, Cookies braucht es nicht
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ORIGINS,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 app.include_router(auth.router)
 app.include_router(users.router)
