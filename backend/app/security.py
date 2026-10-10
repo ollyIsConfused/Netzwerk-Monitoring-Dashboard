@@ -58,23 +58,30 @@ def get_authenticated_user(
 ) -> User:
     """Gueltige Anmeldung - auch wenn noch ein Passwortwechsel aussteht. Nur fuer die
     Endpunkte, die dafuer gebraucht werden (/auth/me, /auth/change-password)."""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Ungültige oder abgelaufene Anmeldung",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    user = user_from_token(db, token)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Ungültige oder abgelaufene Anmeldung",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+
+def user_from_token(db: Session, token: str) -> Optional[User]:
+    """Benutzer zu einem gueltigen Token, sonst None. Auch fuer den WebSocket."""
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        username: Optional[str] = payload.get("sub")
-        if username is None:
-            raise credentials_exception
     except JWTError:
-        raise credentials_exception
+        return None
+    username: Optional[str] = payload.get("sub")
+    if username is None:
+        return None
 
     user = db.query(User).filter(User.username == username).first()
     # Tokens von vor der letzten Passwortaenderung gelten nicht mehr
     if user is None or not user.is_active or payload.get("ver", 0) != (user.token_version or 0):
-        raise credentials_exception
+        return None
     return user
 
 
