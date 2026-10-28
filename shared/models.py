@@ -21,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from .database import Base
+from .interfaces import dump_name_map, friendly_interface_name, load_name_map
 
 
 class UserRole(str, enum.Enum):
@@ -128,6 +129,10 @@ class Device(Base):
     snmp_v3_auth_password = Column(String(64), nullable=True)
     snmp_v3_priv_protocol = Column(String(8), nullable=True)  # des, aes; leer = nur Anmeldung
     snmp_v3_priv_password = Column(String(64), nullable=True)
+    # Namen der Schnittstellen als JSON {"49153": "..."}: vom Collector erkannt (ifName) bzw.
+    # im Geraetedialog von Hand vergeben. Zugriff ueber snmp_interface_names/-labels.
+    snmp_interface_names_json = Column(Text, nullable=True)
+    snmp_interface_labels_json = Column(Text, nullable=True)
 
     # Custom agent configuration (optional - for NAS/webserver push metrics)
     agent_enabled = Column(Boolean, default=False, nullable=False)
@@ -146,6 +151,32 @@ class Device(Base):
     @property
     def tagged_vlan_ids(self) -> list[int]:
         return [vlan.id for vlan in self.tagged_vlans]
+
+    @property
+    def snmp_interface_names(self) -> dict[str, str]:
+        """Vom Geraet gemeldete Namen je Interface-Index, z. B. {"49153": "gigabitEthernet 1/0/1"}."""
+        return load_name_map(self.snmp_interface_names_json)
+
+    @snmp_interface_names.setter
+    def snmp_interface_names(self, names: dict[str, str]) -> None:
+        self.snmp_interface_names_json = dump_name_map(names)
+
+    @property
+    def snmp_interface_labels(self) -> dict[str, str]:
+        """Von Hand vergebene Namen je Interface-Index, z. B. {"49153": "Port 1 - FritzBox"}."""
+        return load_name_map(self.snmp_interface_labels_json)
+
+    @snmp_interface_labels.setter
+    def snmp_interface_labels(self, labels: dict[str, str] | None) -> None:
+        self.snmp_interface_labels_json = dump_name_map(labels)
+
+    @property
+    def interface_labels(self) -> dict[str, str]:
+        """Anzeigename je Schnittstelle: eigener Name, sonst aus dem erkannten ("Port 1")."""
+        detected, manual = self.snmp_interface_names, self.snmp_interface_labels
+        labels = {index: friendly_interface_name(name) for index, name in detected.items()}
+        labels.update(manual)
+        return dict(sorted(labels.items(), key=lambda item: int(item[0])))
 
     @property
     def vlan_addresses(self) -> list[dict]:

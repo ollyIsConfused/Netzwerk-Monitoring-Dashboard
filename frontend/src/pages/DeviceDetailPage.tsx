@@ -212,6 +212,7 @@ export function DeviceDetailPage() {
             samples={samplesByMetric[metricName] ?? []}
             rule={rules.find((r) => r.metric_name === metricName)}
             loading={loading}
+            interfaceLabels={device?.interface_labels}
           />
         ))}
       </div>
@@ -246,7 +247,7 @@ export function DeviceDetailPage() {
               <tbody>
                 {rules.map((rule) => (
                   <tr key={rule.id}>
-                    <td>{metricInfo(rule.metric_name).label}</td>
+                    <td>{metricInfo(rule.metric_name, device?.interface_labels).label}</td>
                     <td className="num">
                       {[
                         rule.warning_max !== null && `≥ ${formatMetricValue(rule.metric_name, rule.warning_max)}`,
@@ -325,12 +326,13 @@ export function DeviceDetailPage() {
           metricOptions={chartMetrics.filter((m) => !rules.some((r) => r.metric_name === m))}
           onClose={() => setEditing(null)}
           onSaved={loadMeta}
+          interfaceLabels={device.interface_labels}
         />
       )}
       {deleting && device && (
         <ConfirmDialog
           title="Schwellenwert löschen"
-          message={`Schwellenwert für „${metricInfo(deleting.metric_name).label}“ löschen? Danach gibt es für diese Metrik keine Alarme mehr.`}
+          message={`Schwellenwert für „${metricInfo(deleting.metric_name, device.interface_labels).label}“ löschen? Danach gibt es für diese Metrik keine Alarme mehr.`}
           onConfirm={async () => {
             await api.delete(`/devices/${device.id}/thresholds/${deleting.id}`);
             await loadMeta();

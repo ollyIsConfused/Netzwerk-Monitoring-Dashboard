@@ -1,7 +1,8 @@
 """Minimal synchronous SNMP GET client (v1, v2c and v3) built on pysnmp's classic hlapi.
 
 Only what the collector needs: per-interface status and octet counters
-(ifOperStatus, ifInOctets, ifOutOctets) for switches/routers.
+(ifOperStatus, ifInOctets, ifOutOctets) for switches/routers, plus the interface names
+(ifName / ifDescr) so the dashboard can show "Port 1" instead of "Interface 49153".
 """
 import logging
 from dataclasses import dataclass
@@ -25,12 +26,17 @@ from pysnmp.hlapi import (
     usmHMACMD5AuthProtocol,
     usmHMACSHAAuthProtocol,
 )
+from pysnmp.proto.rfc1905 import EndOfMibView, NoSuchInstance, NoSuchObject
 
 logger = logging.getLogger(__name__)
 
 OID_IF_OPER_STATUS = "1.3.6.1.2.1.2.2.1.8"
 OID_IF_IN_OCTETS = "1.3.6.1.2.1.2.2.1.10"
 OID_IF_OUT_OCTETS = "1.3.6.1.2.1.2.2.1.16"
+OID_IF_NAME = "1.3.6.1.2.1.31.1.1.1.1"  # kurz, z. B. "gigabitEthernet 1/0/1" oder "eth0.20"
+OID_IF_DESCR = "1.3.6.1.2.1.2.2.1.2"  # Ersatz fuer Geraete ohne IF-MIB-Erweiterung (ifName)
+# So viele Werte hoechstens in einer Anfrage, damit die Antwort in ein UDP-Paket passt
+_MAX_OIDS_PER_REQUEST = 20
 
 # Bezeichnungen wie im Backend (snmp_v3_auth_protocol / snmp_v3_priv_protocol)
 AUTH_PROTOCOLS = {
@@ -121,10 +127,10 @@ def _engine_for(ip_address: str, port: int, auth: SnmpAuth) -> SnmpEngine:
     return _engines[key]
 
 
-def snmp_get_many(
+def _snmp_get(
     ip_address: str, auth: SnmpAuth, oids: list[str], port: int = 161, timeout: int = 3
-) -> dict[str, float]:
-    """Mehrere Werte in einer Anfrage; fehlende oder nicht-numerische Werte fehlen im Ergebnis."""
+) -> Optional[list]:
+    """Rohwerte in derselben Reihenfolge wie oids, bei Fehlern None (mit Logmeldung)."""
     iterator = getCmd(
         _engine_for(ip_address, port, auth),
         auth.pysnmp_auth(),
@@ -142,19 +148,57 @@ def snmp_get_many(
         logger.warning(
             "SNMP-Fehler bei %s (v%s): %s%s", ip_address, auth.version, error_indication, f" - {hint}" if hint else ""
         )
-        return {}
+        return None
     if error_status:
         logger.warning("SNMP-Fehlerstatus bei %s: %s", ip_address, error_status.prettyPrint())
-        return {}
+        return None
+    return [value for _name, value in var_binds]
 
+
+def snmp_get_many(
+    ip_address: str, auth: SnmpAuth, oids: list[str], port: int = 161, timeout: int = 3
+) -> dict[str, float]:
+    """Mehrere Werte in einer Anfrage; fehlende oder nicht-numerische Werte fehlen im Ergebnis."""
+    values = _snmp_get(ip_address, auth, oids, port, timeout)
+    if values is None:
+        return {}
     results: dict[str, float] = {}
-    # Die Antwort enthaelt die Werte in derselben Reihenfolge wie die Anfrage
-    for oid, (_name, value) in zip(oids, var_binds):
+    for oid, value in zip(oids, values):
         try:
             results[oid] = float(value)
         except (ValueError, TypeError):
             pass  # z. B. noSuchInstance, wenn es den Interface-Index nicht gibt
     return results
+
+
+def snmp_get_strings(
+    ip_address: str, auth: SnmpAuth, oids: list[str], port: int = 161, timeout: int = 3
+) -> dict[str, str]:
+    """Wie snmp_get_many, aber fuer Text (z. B. Schnittstellennamen); leere Werte fehlen."""
+    results: dict[str, str] = {}
+    for start in range(0, len(oids), _MAX_OIDS_PER_REQUEST):
+        chunk = oids[start:start + _MAX_OIDS_PER_REQUEST]
+        values = _snmp_get(ip_address, auth, chunk, port, timeout)
+        if values is None:
+            break
+        for oid, value in zip(chunk, values):
+            if isinstance(value, (NoSuchObject, NoSuchInstance, EndOfMibView)):
+                continue
+            text = value.prettyPrint().strip()
+            if text:
+                results[oid] = text
+    return results
+
+
+def poll_interface_names(ip_address: str, auth: SnmpAuth, if_indexes: list[int], port: int = 161) -> dict[int, str]:
+    """Wie das Geraet seine Schnittstellen nennt: ifName, ersatzweise ifDescr."""
+    by_oid = {f"{OID_IF_NAME}.{index}": index for index in if_indexes}
+    names = {by_oid[oid]: text for oid, text in snmp_get_strings(ip_address, auth, list(by_oid), port).items()}
+    missing = [index for index in if_indexes if index not in names]
+    if missing:
+        by_oid = {f"{OID_IF_DESCR}.{index}": index for index in missing}
+        names.update({by_oid[oid]: text for oid, text in snmp_get_strings(ip_address, auth, list(by_oid), port).items()})
+    return names
 
 
 def poll_interface_counters(ip_address: str, auth: SnmpAuth, if_index: int, port: int = 161) -> dict[str, float]:
