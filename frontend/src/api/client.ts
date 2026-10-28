@@ -186,6 +186,8 @@ export interface Device {
   snmp_enabled: boolean;
   snmp_version: SnmpVersion;
   agent_enabled: boolean;
+  /** Anzeigename je SNMP-Interface-Index, z. B. {"49153": "Port 1"} */
+  interface_labels?: Record<string, string>;
 }
 
 /** Alle VLANs, in denen ein Geraet vorkommt: das (native) VLAN und bei Trunks die getaggten. */
@@ -242,7 +244,18 @@ export interface DeviceConfig extends Device {
   snmp_v3_priv_protocol: string | null;
   snmp_v3_priv_password: string | null;
   snmp_interfaces: string | null;
+  /** Von Hand vergebene Namen je Interface-Index */
+  snmp_interface_labels?: Record<string, string>;
+  /** Vom Geraet gemeldete Namen (ifName), z. B. "gigabitEthernet 1/0/1" */
+  snmp_interface_names?: Record<string, string>;
   agent_token: string | null;
+}
+
+/** "gigabitEthernet 1/0/1" -> "Port 1" (wie im Backend, shared/interfaces.py) */
+export function friendlyInterfaceName(name: string): string {
+  const match = /(\d+)\/(\d+)\/(\d+)\s*$/.exec(name.trim());
+  if (!match) return name.trim();
+  return match[1] === "1" ? `Port ${match[3]}` : `Port ${match[1]}/${match[3]}`;
 }
 
 export interface ThresholdRule {
@@ -290,7 +303,14 @@ export interface AlertEvent {
 }
 
 /** Anzeigename und Einheit je Metrik; Interface-Metriken (if3_in_bps) werden erkannt. */
-export function metricInfo(metricName: string): { label: string; unit: string } {
+/**
+ * Bezeichnung und Einheit eines Messwerts. interfaceLabels (Device.interface_labels) macht aus
+ * "Interface 49153 eingehend" z. B. "Port 1 eingehend".
+ */
+export function metricInfo(
+  metricName: string,
+  interfaceLabels?: Record<string, string>,
+): { label: string; unit: string } {
   const known: Record<string, { label: string; unit: string }> = {
     reachable: { label: "Erreichbarkeit", unit: "" },
     latency_ms: { label: "Antwortzeit", unit: "ms" },
@@ -301,12 +321,13 @@ export function metricInfo(metricName: string): { label: string; unit: string } 
     temp_c: { label: "Temperatur", unit: "°C" },
   };
   if (known[metricName]) return known[metricName];
+  const interfaceName = (index: string) => interfaceLabels?.[index] ?? `Interface ${index}`;
   const iface = /^if(\d+)_(in|out)_bps$/.exec(metricName);
   if (iface) {
-    return { label: `Interface ${iface[1]} ${iface[2] === "in" ? "eingehend" : "ausgehend"}`, unit: "bit/s" };
+    return { label: `${interfaceName(iface[1])} ${iface[2] === "in" ? "eingehend" : "ausgehend"}`, unit: "bit/s" };
   }
   const operStatus = /^if(\d+)_oper_status$/.exec(metricName);
-  if (operStatus) return { label: `Interface ${operStatus[1]} Status`, unit: "" };
+  if (operStatus) return { label: `${interfaceName(operStatus[1])} Status`, unit: "" };
   // Weitere Laufwerke vom Agenten, z. B. disk_mnt_storage_pct fuer /mnt/storage
   const disk = /^disk_(.+)_pct$/.exec(metricName);
   if (disk) return { label: `Festplatte /${disk[1].replace(/_/g, "/")}`, unit: "%" };

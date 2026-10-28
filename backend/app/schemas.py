@@ -5,6 +5,7 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
+from shared.interfaces import MAX_DETECTED_NAME_LENGTH, MAX_LABEL_LENGTH
 from shared.models import AlertLevel, DeviceType, MetricStatus, UserRole
 
 # bcrypt verarbeitet maximal 72 Byte, laengere Passwoerter wuerden still abgeschnitten
@@ -48,6 +49,24 @@ SnmpVersion = Literal["1", "2c", "3"]
 SnmpAuthProtocol = Literal["md5", "sha", "sha224", "sha256", "sha384", "sha512"]
 SnmpPrivProtocol = Literal["des", "aes"]
 EmailStr = Annotated[str, AfterValidator(_validate_email)]
+
+
+def _clean_labels(labels: dict[str, str]) -> dict[str, str]:
+    """Leere Namen fallen weg - dann gilt wieder der erkannte Name ("Port 1")."""
+    return {index: label.strip() for index, label in labels.items() if label.strip()}
+
+
+def _shorten_names(names: dict[str, str]) -> dict[str, str]:
+    return {index: name.strip()[:MAX_DETECTED_NAME_LENGTH] for index, name in names.items() if name.strip()}
+
+
+InterfaceIndex = Annotated[str, Field(pattern=r"^\d{1,10}$")]
+# Eigene Namen je Interface-Index, z. B. {"49153": "Port 1 - FritzBox"}
+InterfaceLabels = Annotated[
+    dict[InterfaceIndex, Annotated[str, Field(max_length=MAX_LABEL_LENGTH)]],
+    Field(max_length=128),
+    AfterValidator(_clean_labels),
+]
 
 
 class Token(BaseModel):
@@ -184,6 +203,7 @@ class DeviceCreate(BaseModel):
     snmp_v3_auth_password: Optional[str] = Field(default=None, max_length=64)
     snmp_v3_priv_protocol: Optional[SnmpPrivProtocol] = None
     snmp_v3_priv_password: Optional[str] = Field(default=None, max_length=64)
+    snmp_interface_labels: InterfaceLabels = Field(default_factory=dict)
     agent_enabled: bool = False
     agent_token: Optional[str] = None
 
@@ -207,6 +227,7 @@ class DeviceUpdate(BaseModel):
     snmp_v3_auth_password: Optional[str] = Field(default=None, max_length=64)
     snmp_v3_priv_protocol: Optional[SnmpPrivProtocol] = None
     snmp_v3_priv_password: Optional[str] = Field(default=None, max_length=64)
+    snmp_interface_labels: Optional[InterfaceLabels] = None
     agent_enabled: Optional[bool] = None
     agent_token: Optional[str] = None
 
@@ -225,6 +246,8 @@ class DeviceOut(BaseModel):
     snmp_enabled: bool
     snmp_version: str = "2c"
     agent_enabled: bool
+    # Anzeigename je SNMP-Schnittstelle ("Port 1" statt "Interface 49153")
+    interface_labels: dict[str, str] = {}
 
 
 class DeviceConfigOut(DeviceOut):
@@ -238,6 +261,9 @@ class DeviceConfigOut(DeviceOut):
     snmp_v3_auth_protocol: Optional[str] = None
     snmp_v3_auth_password: Optional[str] = None
     snmp_v3_priv_protocol: Optional[str] = None
+    # Fuer den Dialog: eigene Namen und die vom Geraet gemeldeten
+    snmp_interface_labels: dict[str, str] = {}
+    snmp_interface_names: dict[str, str] = {}
     snmp_v3_priv_password: Optional[str] = None
     agent_token: Optional[str] = None
 
@@ -312,3 +338,10 @@ class CollectorMetricIn(BaseModel):
 
 class CollectorMetricBatch(BaseModel):
     samples: list[CollectorMetricIn]
+
+
+class CollectorInterfaceNames(BaseModel):
+    """Namen der abgefragten Schnittstellen, wie das Geraet sie meldet (ifName)."""
+
+    device_id: int
+    names: Annotated[dict[InterfaceIndex, str], Field(max_length=512), AfterValidator(_shorten_names)]

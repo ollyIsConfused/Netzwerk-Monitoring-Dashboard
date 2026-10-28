@@ -51,13 +51,16 @@ export function MetricChart({
   samples,
   rule,
   loading,
+  interfaceLabels,
 }: {
   metricName: string;
   samples: MetricSamplePoint[];
   rule?: ThresholdRule;
   loading: boolean;
+  /** Portnamen des Geraets ("Port 1" statt "Interface 49153") */
+  interfaceLabels?: Record<string, string>;
 }) {
-  const { label, unit } = metricInfo(metricName);
+  const { label, unit } = metricInfo(metricName, interfaceLabels);
   const points: Point[] = samples.map((s) => ({ t: parseTimestamp(s.timestamp), value: s.value }));
   const spanMs = points.length > 1 ? points[points.length - 1].t - points[0].t : 0;
   const isReachable = metricName === "reachable";

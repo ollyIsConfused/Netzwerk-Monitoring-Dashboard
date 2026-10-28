@@ -18,11 +18,11 @@ const PRESETS: Preset[] = [
 ];
 
 /** Vorlagen fuer Metriken mit Nummer bzw. Pfad im Namen (Interfaces, weitere Laufwerke). */
-function patternPresets(metricOptions: string[]): Preset[] {
+function patternPresets(metricOptions: string[], interfaceLabels?: Record<string, string>): Preset[] {
   return metricOptions.flatMap((metric): Preset[] => {
     // ifOperStatus: 1 = up, ab 2 (down, testing, ...) ist die Schnittstelle nicht in Betrieb
     if (/^if\d+_oper_status$/.test(metric)) {
-      return [{ label: `${metricInfo(metric).label}: aus`, metric, values: { critical_max: 2 } }];
+      return [{ label: `${metricInfo(metric, interfaceLabels).label}: aus`, metric, values: { critical_max: 2 } }];
     }
     if (/^disk_.+_pct$/.test(metric)) {
       return [{ label: metricInfo(metric).label, metric, values: { warning_max: 80, critical_max: 90 } }];
@@ -46,12 +46,15 @@ export function ThresholdDialog({
   metricOptions,
   onClose,
   onSaved,
+  interfaceLabels,
 }: {
   deviceId: number;
   rule: ThresholdRule | null;
   metricOptions: string[];
   onClose: () => void;
   onSaved: () => void;
+  /** Portnamen des Geraets ("Port 1" statt "Interface 49153") */
+  interfaceLabels?: Record<string, string>;
 }) {
   const [metric, setMetric] = useState(rule?.metric_name ?? metricOptions[0] ?? "reachable");
   const [values, setValues] = useState<Record<NumberField, string>>({
@@ -123,7 +126,7 @@ export function ThresholdDialog({
   // Nur Vorlagen fuer Metriken anbieten, die noch keinen Schwellenwert haben
   const presets = [
     ...PRESETS.filter((preset) => metricOptions.includes(preset.metric)),
-    ...patternPresets(metricOptions),
+    ...patternPresets(metricOptions, interfaceLabels),
   ];
   const numberInput = (key: NumberField, label: string) => (
     <label className="field">
@@ -141,7 +144,7 @@ export function ThresholdDialog({
   );
 
   return (
-    <Modal title={rule ? `Schwellenwert: ${metricInfo(rule.metric_name).label}` : "Schwellenwert anlegen"} onClose={onClose}>
+    <Modal title={rule ? `Schwellenwert: ${metricInfo(rule.metric_name, interfaceLabels).label}` : "Schwellenwert anlegen"} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         {!rule && (
           <>
@@ -160,7 +163,7 @@ export function ThresholdDialog({
               <select className="select" value={metric} onChange={(e) => setMetric(e.target.value)}>
                 {metricOptions.map((name) => (
                   <option key={name} value={name}>
-                    {metricInfo(name).label} ({name})
+                    {metricInfo(name, interfaceLabels).label} ({name})
                   </option>
                 ))}
               </select>
