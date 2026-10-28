@@ -99,7 +99,7 @@ export function AlertsPage() {
                         {devices[alert.device_id]?.name ?? `#${alert.device_id}`}
                       </Link>
                     </td>
-                    <td>{metricInfo(alert.metric_name).label}</td>
+                    <td>{metricInfo(alert.metric_name, devices[alert.device_id]?.interface_labels).label}</td>
                     <td>{alert.message}</td>
                     <td className="num muted">{formatDateTime(alert.acknowledged_at)}</td>
                     {canAcknowledge && (

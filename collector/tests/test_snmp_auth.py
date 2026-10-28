@@ -75,6 +75,7 @@ def test_poll_snmp_uses_v3_credentials(monkeypatch):
         return {f"if{if_index}_oper_status": 1.0}
 
     monkeypatch.setattr(main, "poll_interface_counters", fake_poll)
+    monkeypatch.setattr(main, "_report_interface_names", lambda *args: None)
     samples = main._poll_snmp(_device(), datetime(2026, 10, 6, 12, 0))
     assert calls == [("192.168.178.2", "3", "Monitoring", 49153), ("192.168.178.2", "3", "Monitoring", 49154)]
     assert {s["metric_name"] for s in samples} == {"if49153_oper_status", "if49154_oper_status"}

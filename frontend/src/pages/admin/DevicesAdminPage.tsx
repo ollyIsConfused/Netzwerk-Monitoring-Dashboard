@@ -8,6 +8,7 @@ import {
   DeviceType,
   DEVICE_TYPE_LABELS,
   describeDeviceVlans,
+  friendlyInterfaceName,
   PortMode,
   SNMP_AUTH_PROTOCOLS,
   SNMP_PRIV_PROTOCOLS,
@@ -33,6 +34,8 @@ interface DeviceForm {
   snmp_version: SnmpVersion;
   snmp_port: string;
   snmp_interfaces: string;
+  /** Eigene Portnamen je Interface-Index */
+  snmp_interface_labels: Record<string, string>;
   snmp_v3_user: string;
   snmp_v3_auth_protocol: string;
   snmp_v3_auth_password: string;
@@ -58,6 +61,7 @@ const EMPTY_FORM: DeviceForm = {
   snmp_version: "3",
   snmp_port: "161",
   snmp_interfaces: "",
+  snmp_interface_labels: {},
   snmp_v3_user: "",
   snmp_v3_auth_protocol: "sha",
   snmp_v3_auth_password: "",
@@ -89,6 +93,8 @@ function DeviceDialog({
 }) {
   const [form, setForm] = useState<DeviceForm>(EMPTY_FORM);
   const [loaded, setLoaded] = useState(device === null);
+  // Vom Geraet gemeldete Portnamen (der Collector liest sie per SNMP), z. B. "gigabitEthernet 1/0/1"
+  const [detectedNames, setDetectedNames] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -112,6 +118,7 @@ function DeviceDialog({
           snmp_version: data.snmp_version,
           snmp_port: String(data.snmp_port),
           snmp_interfaces: data.snmp_interfaces ?? "",
+          snmp_interface_labels: data.snmp_interface_labels ?? {},
           snmp_v3_user: data.snmp_v3_user ?? "",
           snmp_v3_auth_protocol: data.snmp_v3_auth_protocol ?? "sha",
           snmp_v3_auth_password: data.snmp_v3_auth_password ?? "",
@@ -121,6 +128,7 @@ function DeviceDialog({
           agent_enabled: data.agent_enabled,
           agent_token: data.agent_token ?? "",
         });
+        setDetectedNames(data.snmp_interface_names ?? {});
         setLoaded(true);
       })
       .catch((err) => setError(apiErrorMessage(err, "Gerät konnte nicht geladen werden.")));
@@ -148,12 +156,25 @@ function DeviceDialog({
     }));
   }
 
+  function setInterfaceLabel(index: string, value: string) {
+    setForm((current) => ({ ...current, snmp_interface_labels: { ...current.snmp_interface_labels, [index]: value } }));
+  }
+
   function setVlanAddress(vlanId: number, value: string) {
     setForm((prev) => ({ ...prev, vlan_addresses: { ...prev.vlan_addresses, [vlanId]: value } }));
   }
 
   const isTrunk = form.port_mode === "trunk";
   const isV3 = form.snmp_version === "3";
+  // Eingetragene Interface-Indizes ohne Doppelte, z. B. "49153, 49154" -> ["49153", "49154"]
+  const interfaceIndexes = [
+    ...new Set(
+      form.snmp_interfaces
+        .split(",")
+        .map((part) => part.trim())
+        .filter((part) => /^\d{1,10}$/.test(part)),
+    ),
+  ];
   const [showSecrets, setShowSecrets] = useState(false);
   const taggedVlans = vlans.filter((vlan) => form.tagged_vlan_ids.includes(vlan.id));
 
@@ -206,6 +227,12 @@ function DeviceDialog({
       snmp_version: form.snmp_version,
       snmp_port: Number(form.snmp_port) || 161,
       snmp_interfaces: form.snmp_interfaces.trim() || null,
+      // Nur Namen fuer Ports, die noch in der Liste stehen; leer = Name vom Geraet
+      snmp_interface_labels: Object.fromEntries(
+        interfaceIndexes
+          .map((index) => [index, (form.snmp_interface_labels[index] ?? "").trim()])
+          .filter(([, label]) => label !== ""),
+      ),
       snmp_v3_user: isV3 ? form.snmp_v3_user.trim() || null : null,
       snmp_v3_auth_protocol: isV3 ? form.snmp_v3_auth_protocol : null,
       snmp_v3_auth_password: isV3 ? form.snmp_v3_auth_password || null : null,
@@ -472,6 +499,34 @@ function DeviceDialog({
                   />
                   <small>Nummern aus snmpwalk, durch Komma getrennt (siehe Anleitung, Abschnitt 2.3).</small>
                 </label>
+                {interfaceIndexes.length > 0 && (
+                  <div className="vlan-address-list span-2">
+                    <span className="vlan-address-title">Namen der Ports (optional)</span>
+                    {interfaceIndexes.map((index) => {
+                      const detected = detectedNames[index];
+                      return (
+                        <label key={index} className="vlan-address-row">
+                          <span>
+                            <span className="mono">{index}</span>
+                            {detected && <span className="muted"> · {detected}</span>}
+                          </span>
+                          <input
+                            className="input"
+                            value={form.snmp_interface_labels[index] ?? ""}
+                            onChange={(e) => setInterfaceLabel(index, e.target.value)}
+                            placeholder={detected ? friendlyInterfaceName(detected) : `z. B. Port 1 – FritzBox`}
+                            maxLength={40}
+                            aria-label={`Name für Interface ${index}`}
+                          />
+                        </label>
+                      );
+                    })}
+                    <small>
+                      Leer lassen zeigt den Namen, den das Gerät meldet (aus „gigabitEthernet 1/0/1“ wird „Port 1“).
+                      Der Collector liest ihn nach dem Speichern innerhalb einer Abfragerunde aus.
+                    </small>
+                  </div>
+                )}
               </div>
             )}
           </fieldset>
