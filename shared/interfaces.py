@@ -26,6 +26,14 @@ def friendly_interface_name(name: str) -> str:
     return name
 
 
+def combine_interface_label(automatic: Optional[str], label: str) -> str:
+    """Eigener Name ergaenzt den Portnamen, damit die Nummer sichtbar bleibt: "FritzBox" an
+    Port 1 wird "Port 1 – FritzBox". Beginnt der eigene Name schon damit, bleibt er wie er ist."""
+    if not automatic or label.lower().startswith(automatic.lower()):
+        return label
+    return f"{automatic} – {label}"
+
+
 def load_name_map(raw: Optional[str]) -> dict[str, str]:
     """JSON {"49153": "..."} aus der Datenbank; Unbrauchbares wird ignoriert."""
     if not raw:

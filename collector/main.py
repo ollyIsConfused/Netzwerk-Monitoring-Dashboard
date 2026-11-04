@@ -19,7 +19,7 @@ from typing import Optional
 import requests
 
 from .ping_client import ping_host
-from .snmp_client import SnmpAuth, poll_interface_counters, poll_interface_names, snmp_auth
+from .snmp_client import SnmpAuth, discover_interface_names, poll_interface_counters, poll_interface_names, snmp_auth
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("collector")
@@ -117,8 +117,8 @@ def push_interface_names(device_id: int, names: dict[int, str]) -> None:
 
 
 def _report_interface_names(device: CollectorDevice, auth: SnmpAuth, if_indexes: list[int]) -> None:
-    """Namen der Schnittstellen (z. B. "gigabitEthernet 1/0/1") ans Backend, das daraus
-    "Port 1" macht. Fehler hier stoeren die Messung nicht."""
+    """Alle Schnittstellen mit Namen (z. B. "gigabitEthernet 1/0/1") ans Backend, das daraus
+    "Port 1" macht und sie im Geraetedialog zum Anhaken anbietet. Fehler stoeren die Messung nicht."""
     key = tuple(sorted(if_indexes))
     checked = _names_checked.get(device.id)
     now = time.monotonic()
@@ -126,7 +126,12 @@ def _report_interface_names(device: CollectorDevice, auth: SnmpAuth, if_indexes:
         return
     _names_checked[device.id] = (key, now)
 
-    names = poll_interface_names(device.ip_address, auth, list(key), device.snmp_port)
+    # Alle Ports des Geraets, damit man sie im Dashboard nur noch anhaken muss ("Port 1" bis
+    # "Port 10"); eingetragene Indizes, die dabei fehlen, einzeln nachfragen
+    names = discover_interface_names(device.ip_address, auth, device.snmp_port)
+    missing = [index for index in key if index not in names]
+    if missing:
+        names.update(poll_interface_names(device.ip_address, auth, missing, device.snmp_port))
     if not names or names == _names_reported.get(device.id):
         return
     try:
@@ -202,7 +207,8 @@ def _poll_snmp(device: CollectorDevice, now: datetime) -> list[dict]:
             if bw_sample:
                 samples.append(bw_sample)
 
-    if answered:
+    # Auch ohne eingetragene Ports nachsehen, welche das Geraet hat - sonst gaebe es nichts anzuhaken
+    if answered or not (device.snmp_interfaces or "").strip():
         try:
             _report_interface_names(device, auth, if_indexes)
         except Exception:

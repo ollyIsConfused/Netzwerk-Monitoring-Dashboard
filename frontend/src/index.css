@@ -703,6 +703,72 @@ textarea.input {
   }
 }
 
+/* Ports zum Anhaken (SNMP): Haken + Portname links, eigener Name rechts */
+.port-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.port-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.port-list-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.port-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.port-row:last-of-type {
+  border-bottom: none;
+}
+
+.port-row .checkbox > span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.port-row:not(.is-chosen) b {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.port-meta {
+  font-size: 12px;
+}
+
+.port-manual summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.port-manual .input {
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+@media (max-width: 600px) {
+  .port-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 /* Mehrfachauswahl nebeneinander, z. B. getaggte VLANs eines Trunk-Ports */
 .check-grid {
   display: flex;

@@ -46,18 +46,21 @@ def test_collector_names_become_port_labels(client, admin_headers):
 
 
 def test_manual_labels_override_and_can_be_cleared(client, admin_headers):
-    device = _switch(client, admin_headers, snmp_interface_labels={"49153": "  Port 1 – FritzBox  ", "49154": " "})
+    device = _switch(client, admin_headers, snmp_interface_labels={"49153": "  Port 1 – FritzBox  ", "49154": " ",
+                                                                    "49155": "NAS"})
     client.post("/collector/interface-names",
-                json={"device_id": device["id"], "names": {"49153": "gigabitEthernet 1/0/1", "49154": "gigabitEthernet 1/0/2"}},
+                json={"device_id": device["id"], "names": {"49153": "gigabitEthernet 1/0/1", "49154": "gigabitEthernet 1/0/2",
+                                                         "49155": "gigabitEthernet 1/0/3"}},
                 headers=COLLECTOR)
     shown = client.get(f"/devices/{device['id']}", headers=admin_headers).json()
-    assert shown["interface_labels"] == {"49153": "Port 1 – FritzBox", "49154": "Port 2"}
+    # Eigener Name ohne Portnummer wird ergaenzt, mit Portnummer bleibt er wie eingegeben
+    assert shown["interface_labels"] == {"49153": "Port 1 – FritzBox", "49154": "Port 2", "49155": "Port 3 – NAS"}
     config = client.get(f"/devices/{device['id']}/config", headers=admin_headers).json()
-    assert config["snmp_interface_labels"] == {"49153": "Port 1 – FritzBox"}
+    assert config["snmp_interface_labels"] == {"49153": "Port 1 – FritzBox", "49155": "NAS"}
 
     response = client.patch(f"/devices/{device['id']}", json={"snmp_interface_labels": {}}, headers=admin_headers)
     assert response.status_code == 200
-    assert response.json()["interface_labels"] == {"49153": "Port 1", "49154": "Port 2"}
+    assert response.json()["interface_labels"] == {"49153": "Port 1", "49154": "Port 2", "49155": "Port 3"}
 
 
 def test_label_validation(client, admin_headers):

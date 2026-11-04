@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from .database import Base
-from .interfaces import dump_name_map, friendly_interface_name, load_name_map
+from .interfaces import combine_interface_label, dump_name_map, friendly_interface_name, load_name_map
 
 
 class UserRole(str, enum.Enum):
@@ -172,10 +172,11 @@ class Device(Base):
 
     @property
     def interface_labels(self) -> dict[str, str]:
-        """Anzeigename je Schnittstelle: eigener Name, sonst aus dem erkannten ("Port 1")."""
+        """Anzeigename je Schnittstelle: "Port 1", mit eigenem Namen "Port 1 – FritzBox"."""
         detected, manual = self.snmp_interface_names, self.snmp_interface_labels
         labels = {index: friendly_interface_name(name) for index, name in detected.items()}
-        labels.update(manual)
+        for index, label in manual.items():
+            labels[index] = combine_interface_label(labels.get(index), label)
         return dict(sorted(labels.items(), key=lambda item: int(item[0])))
 
     @property

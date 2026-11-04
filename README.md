@@ -140,9 +140,10 @@ anlegen (IP-Adresse, VLAN, für Switch/Router SNMP-Community und Interface-Indiz
 für NAS/Webserver optional ein Agent-Token). Ein Gerät an einem Trunk-Port (z. B.
 der Router) bekommt ein natives VLAN, mehrere getaggte VLANs und je getaggtem VLAN
 optional seine Adresse dort (beim Router das Gateway). Die Übersicht zeigt es in
-jeder VLAN-Karte mit dieser Adresse; angepingt wird die Haupt-IP. SNMP-Schnittstellen
-heißen in den Diagrammen so, wie das Gerät sie meldet („Port 1“ statt „Interface 49153“),
-oder wie im Gerätedialog unter „Namen der Ports“ vergeben. Auf der
+jeder VLAN-Karte mit dieser Adresse; angepingt wird die Haupt-IP. Die Ports eines
+Switches liest der Collector selbst aus; im Gerätedialog werden sie als „Port 1“ bis „Port N“
+nur noch angehakt und optional benannt („Port 1 – FritzBox“). So heißen sie auch in den
+Diagrammen statt „Interface 49153“. Auf der
 Detailseite eines Geräts lassen sich Schwellenwerte anlegen, z. B. mit der Vorlage
 „Offline-Alarm“.
 

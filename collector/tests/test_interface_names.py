@@ -38,41 +38,59 @@ def _device(**overrides):
     return main.CollectorDevice(**values)
 
 
-def _setup(monkeypatch, names):
+def _setup(monkeypatch, names, single=None):
+    """names: was die Schnittstellentabelle liefert; single: Antworten auf Einzelabfragen."""
     main._names_checked.clear()
     main._names_reported.clear()
-    lookups, pushes = [], []
+    walks, singles, pushes = [], [], []
     monkeypatch.setattr(main, "poll_interface_counters", lambda ip, auth, index, port: {f"if{index}_oper_status": 1.0})
 
-    def fake_names(ip, auth, indexes, port):
-        lookups.append(indexes)
+    def fake_walk(ip, auth, port):
+        walks.append(ip)
         return dict(names)
 
-    monkeypatch.setattr(main, "poll_interface_names", fake_names)
+    def fake_single(ip, auth, indexes, port):
+        singles.append(indexes)
+        return {index: (single or {})[index] for index in indexes if index in (single or {})}
+
+    monkeypatch.setattr(main, "discover_interface_names", fake_walk)
+    monkeypatch.setattr(main, "poll_interface_names", fake_single)
     monkeypatch.setattr(main, "push_interface_names", lambda device_id, found: pushes.append((device_id, found)))
-    return lookups, pushes
+    return walks, singles, pushes
 
 
-def test_names_are_read_once_and_pushed_once(monkeypatch):
-    lookups, pushes = _setup(monkeypatch, {49153: "gigabitEthernet 1/0/1", 49154: "gigabitEthernet 1/0/2"})
-    now = datetime(2026, 10, 28, 12, 0)
+TP_LINK = {1: "Vlan-interface1", **{49152 + port: f"gigabitEthernet 1/0/{port}" for port in range(1, 11)}}
+
+
+def test_all_ports_are_discovered_once_and_pushed_once(monkeypatch):
+    walks, singles, pushes = _setup(monkeypatch, TP_LINK)
+    now = datetime(2026, 11, 4, 12, 0)
 
     main._poll_snmp(_device(), now)
     main._poll_snmp(_device(), now)
-    assert lookups == [[49153, 49154]]  # zweite Runde innerhalb der Stunde: keine Abfrage
-    assert pushes == [(5, {49153: "gigabitEthernet 1/0/1", 49154: "gigabitEthernet 1/0/2"})]
+    assert len(walks) == 1  # zweite Runde innerhalb der Stunde: keine Abfrage
+    assert singles == []  # alle eingetragenen Ports waren in der Tabelle
+    assert pushes == [(5, TP_LINK)]  # alle 10 Ports, nicht nur die zwei eingetragenen
 
     # Neuer Port in der Liste: sofort neu lesen
     main._poll_snmp(_device(snmp_interfaces="49153,49154,49155"), now)
-    assert lookups[-1] == [49153, 49154, 49155]
+    assert len(walks) == 2
+
+
+def test_missing_ports_are_asked_individually(monkeypatch):
+    # Manche Geraete geben die Tabelle nicht vollstaendig heraus
+    walks, singles, pushes = _setup(monkeypatch, {49153: "gigabitEthernet 1/0/1"}, single={49154: "gigabitEthernet 1/0/2"})
+    main._poll_snmp(_device(), datetime(2026, 11, 4, 12, 0))
+    assert singles == [[49154]]
+    assert pushes == [(5, {49153: "gigabitEthernet 1/0/1", 49154: "gigabitEthernet 1/0/2"})]
 
 
 def test_unchanged_names_are_not_pushed_again(monkeypatch):
-    lookups, pushes = _setup(monkeypatch, {49153: "gigabitEthernet 1/0/1"})
-    main._poll_snmp(_device(snmp_interfaces="49153"), datetime(2026, 10, 28, 12, 0))
+    walks, _singles, pushes = _setup(monkeypatch, {49153: "gigabitEthernet 1/0/1"})
+    main._poll_snmp(_device(snmp_interfaces="49153"), datetime(2026, 11, 4, 12, 0))
     main._names_checked.clear()  # Stunde ist um
-    main._poll_snmp(_device(snmp_interfaces="49153"), datetime(2026, 10, 28, 13, 0))
-    assert len(lookups) == 2 and len(pushes) == 1
+    main._poll_snmp(_device(snmp_interfaces="49153"), datetime(2026, 11, 4, 13, 0))
+    assert len(walks) == 2 and len(pushes) == 1
 
 
 def test_old_backend_without_endpoint_does_not_break_polling(monkeypatch):
@@ -82,12 +100,20 @@ def test_old_backend_without_endpoint_does_not_break_polling(monkeypatch):
         raise requests.HTTPError("404 Not Found")
 
     monkeypatch.setattr(main, "push_interface_names", not_found)
-    samples = main._poll_snmp(_device(snmp_interfaces="49153"), datetime(2026, 10, 28, 12, 0))
+    samples = main._poll_snmp(_device(snmp_interfaces="49153"), datetime(2026, 11, 4, 12, 0))
     assert [s["metric_name"] for s in samples] == ["if49153_oper_status"]
 
 
-def test_unreachable_device_is_not_asked_for_names(monkeypatch):
-    lookups, _pushes = _setup(monkeypatch, {})
+def test_ports_are_discovered_even_before_any_are_chosen(monkeypatch):
+    # Neues Geraet ohne eingetragene Ports: trotzdem die Liste zum Anhaken holen
+    walks, _singles, pushes = _setup(monkeypatch, TP_LINK)
     monkeypatch.setattr(main, "poll_interface_counters", lambda *args: {})
-    assert main._poll_snmp(_device(), datetime(2026, 10, 28, 12, 0)) == []
-    assert lookups == []
+    main._poll_snmp(_device(snmp_interfaces=None), datetime(2026, 11, 4, 12, 0))
+    assert len(walks) == 1 and pushes == [(5, TP_LINK)]
+
+
+def test_unreachable_device_with_chosen_ports_is_not_walked(monkeypatch):
+    walks, _singles, _pushes = _setup(monkeypatch, {})
+    monkeypatch.setattr(main, "poll_interface_counters", lambda *args: {})
+    assert main._poll_snmp(_device(), datetime(2026, 11, 4, 12, 0)) == []
+    assert walks == []
