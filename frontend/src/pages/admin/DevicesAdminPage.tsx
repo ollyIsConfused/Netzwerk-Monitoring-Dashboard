@@ -8,6 +8,7 @@ import {
   DeviceType,
   DEVICE_TYPE_LABELS,
   describeDeviceVlans,
+  friendlyInterfaceName,
   PortMode,
   SNMP_AUTH_PROTOCOLS,
   SNMP_PRIV_PROTOCOLS,
@@ -33,6 +34,8 @@ interface DeviceForm {
   snmp_version: SnmpVersion;
   snmp_port: string;
   snmp_interfaces: string;
+  /** Eigene Portnamen je Interface-Index */
+  snmp_interface_labels: Record<string, string>;
   snmp_v3_user: string;
   snmp_v3_auth_protocol: string;
   snmp_v3_auth_password: string;
@@ -58,6 +61,7 @@ const EMPTY_FORM: DeviceForm = {
   snmp_version: "3",
   snmp_port: "161",
   snmp_interfaces: "",
+  snmp_interface_labels: {},
   snmp_v3_user: "",
   snmp_v3_auth_protocol: "sha",
   snmp_v3_auth_password: "",
@@ -89,6 +93,8 @@ function DeviceDialog({
 }) {
   const [form, setForm] = useState<DeviceForm>(EMPTY_FORM);
   const [loaded, setLoaded] = useState(device === null);
+  // Vom Geraet gemeldete Portnamen (der Collector liest sie per SNMP), z. B. "gigabitEthernet 1/0/1"
+  const [detectedNames, setDetectedNames] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -112,6 +118,7 @@ function DeviceDialog({
           snmp_version: data.snmp_version,
           snmp_port: String(data.snmp_port),
           snmp_interfaces: data.snmp_interfaces ?? "",
+          snmp_interface_labels: data.snmp_interface_labels ?? {},
           snmp_v3_user: data.snmp_v3_user ?? "",
           snmp_v3_auth_protocol: data.snmp_v3_auth_protocol ?? "sha",
           snmp_v3_auth_password: data.snmp_v3_auth_password ?? "",
@@ -121,6 +128,7 @@ function DeviceDialog({
           agent_enabled: data.agent_enabled,
           agent_token: data.agent_token ?? "",
         });
+        setDetectedNames(data.snmp_interface_names ?? {});
         setLoaded(true);
       })
       .catch((err) => setError(apiErrorMessage(err, "Gerät konnte nicht geladen werden.")));
@@ -148,12 +156,52 @@ function DeviceDialog({
     }));
   }
 
+  function setInterfaceLabel(index: string, value: string) {
+    setForm((current) => ({ ...current, snmp_interface_labels: { ...current.snmp_interface_labels, [index]: value } }));
+  }
+
   function setVlanAddress(vlanId: number, value: string) {
     setForm((prev) => ({ ...prev, vlan_addresses: { ...prev.vlan_addresses, [vlanId]: value } }));
   }
 
   const isTrunk = form.port_mode === "trunk";
   const isV3 = form.snmp_version === "3";
+  // Eingetragene Interface-Indizes ohne Doppelte, z. B. "49153, 49154" -> ["49153", "49154"]
+  const interfaceIndexes = [
+    ...new Set(
+      form.snmp_interfaces
+        .split(",")
+        .map((part) => part.trim())
+        .filter((part) => /^\d{1,10}$/.test(part)),
+    ),
+  ];
+  // Alle Schnittstellen, die der Collector auf dem Geraet gefunden hat, plus eingetragene ohne Namen;
+  // "Port 1" bis "Port N" zuerst und in Port-Reihenfolge, danach der Rest (z. B. Vlan-interface1)
+  const portChoices = [...new Set([...Object.keys(detectedNames), ...interfaceIndexes])]
+    .map((index) => {
+      const detected = detectedNames[index];
+      const name = detected ? friendlyInterfaceName(detected) : `Interface ${index}`;
+      const port = /^Port (?:(\d+)\/)?(\d+)$/.exec(name);
+      return {
+        index,
+        detected,
+        name,
+        isPort: port !== null,
+        order: port ? [0, Number(port[1] ?? 1), Number(port[2])] : [1, Number(index), 0],
+      };
+    })
+    .sort((a, b) => a.order[0] - b.order[0] || a.order[1] - b.order[1] || a.order[2] - b.order[2]);
+  const hasDetectedPorts = Object.keys(detectedNames).length > 0;
+
+  function setChosenPorts(indexes: string[]) {
+    const sorted = [...new Set(indexes)].sort((a, b) => Number(a) - Number(b));
+    set("snmp_interfaces", sorted.join(","));
+  }
+
+  function togglePort(index: string, checked: boolean) {
+    setChosenPorts(checked ? [...interfaceIndexes, index] : interfaceIndexes.filter((i) => i !== index));
+  }
+
   const [showSecrets, setShowSecrets] = useState(false);
   const taggedVlans = vlans.filter((vlan) => form.tagged_vlan_ids.includes(vlan.id));
 
@@ -206,6 +254,12 @@ function DeviceDialog({
       snmp_version: form.snmp_version,
       snmp_port: Number(form.snmp_port) || 161,
       snmp_interfaces: form.snmp_interfaces.trim() || null,
+      // Nur Namen fuer Ports, die noch in der Liste stehen; leer = Name vom Geraet
+      snmp_interface_labels: Object.fromEntries(
+        interfaceIndexes
+          .map((index) => [index, (form.snmp_interface_labels[index] ?? "").trim()])
+          .filter(([, label]) => label !== ""),
+      ),
       snmp_v3_user: isV3 ? form.snmp_v3_user.trim() || null : null,
       snmp_v3_auth_protocol: isV3 ? form.snmp_v3_auth_protocol : null,
       snmp_v3_auth_password: isV3 ? form.snmp_v3_auth_password || null : null,
@@ -462,16 +516,77 @@ function DeviceDialog({
                   <input type="checkbox" checked={showSecrets} onChange={(e) => setShowSecrets(e.target.checked)} />
                   {isV3 ? "Passwörter anzeigen" : "Community anzeigen"}
                 </label>
-                <label className="field span-2">
-                  <span>Interface-Indizes</span>
-                  <input
-                    className="input mono"
-                    value={form.snmp_interfaces}
-                    onChange={(e) => set("snmp_interfaces", e.target.value)}
-                    placeholder="1,2,3"
-                  />
-                  <small>Nummern aus snmpwalk, durch Komma getrennt (siehe Anleitung, Abschnitt 2.3).</small>
-                </label>
+                <div className="port-list span-2">
+                  <div className="port-list-head">
+                    <span className="vlan-address-title">Ports, die abgefragt werden</span>
+                    {hasDetectedPorts && (
+                      <span className="port-list-actions">
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() =>
+                            setChosenPorts(
+                              portChoices.some((choice) => choice.isPort)
+                                ? portChoices.filter((choice) => choice.isPort).map((choice) => choice.index)
+                                : portChoices.map((choice) => choice.index),
+                            )
+                          }
+                        >
+                          Alle Ports
+                        </button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setChosenPorts([])}>
+                          Keine
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                  {portChoices.map((choice) => {
+                    const chosen = interfaceIndexes.includes(choice.index);
+                    return (
+                      <div key={choice.index} className={`port-row${chosen ? " is-chosen" : ""}`}>
+                        <label className="checkbox">
+                          <input
+                            type="checkbox"
+                            checked={chosen}
+                            onChange={(e) => togglePort(choice.index, e.target.checked)}
+                          />
+                          <span>
+                            <b>{choice.name}</b>
+                            <small className="muted port-meta">
+                              {choice.detected && choice.detected !== choice.name ? `${choice.detected} · ` : ""}
+                              Index {choice.index}
+                            </small>
+                          </span>
+                        </label>
+                        <input
+                          className="input"
+                          value={form.snmp_interface_labels[choice.index] ?? ""}
+                          onChange={(e) => setInterfaceLabel(choice.index, e.target.value)}
+                          placeholder={chosen ? "eigener Name, z. B. FritzBox" : ""}
+                          maxLength={40}
+                          disabled={!chosen}
+                          aria-label={`Name für ${choice.name}`}
+                        />
+                      </div>
+                    );
+                  })}
+                  <small>
+                    {hasDetectedPorts
+                      ? "Die Liste liest der Collector vom Gerät (stündlich aktualisiert). Ein eigener Name ergänzt die Portnummer: „FritzBox“ an Port 1 erscheint als „Port 1 – FritzBox“."
+                      : "Noch keine Ports bekannt. Nach dem Speichern liest der Collector die Ports des Geräts aus (dauert etwa eine Minute) - dann den Dialog erneut öffnen und die Ports anhaken."}
+                  </small>
+                  <details className="port-manual" open={!hasDetectedPorts && interfaceIndexes.length > 0}>
+                    <summary>Interface-Indizes von Hand eintragen</summary>
+                    <input
+                      className="input mono"
+                      value={form.snmp_interfaces}
+                      onChange={(e) => set("snmp_interfaces", e.target.value)}
+                      placeholder="1,2,3"
+                      aria-label="Interface-Indizes"
+                    />
+                    <small>Nummern aus snmpwalk, durch Komma getrennt (siehe Anleitung, Abschnitt 2.3).</small>
+                  </details>
+                </div>
               </div>
             )}
           </fieldset>

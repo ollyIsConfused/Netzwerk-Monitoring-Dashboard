@@ -5,7 +5,7 @@ from shared.metrics_engine import record_metric
 from shared.models import Device
 
 from ..deps import get_db
-from ..schemas import CollectorDeviceOut, CollectorMetricBatch
+from ..schemas import CollectorDeviceOut, CollectorInterfaceNames, CollectorMetricBatch
 from ..security import require_collector_token
 
 router = APIRouter(prefix="/collector", tags=["collector"], dependencies=[Depends(require_collector_token)])
@@ -35,3 +35,17 @@ def push_collector_metrics(payload: CollectorMetricBatch, db: Session = Depends(
         stored += 1
 
     return {"stored": stored}
+
+
+@router.post("/interface-names")
+def push_interface_names(payload: CollectorInterfaceNames, db: Session = Depends(get_db)):
+    """Der Collector meldet, wie das Geraet seine Schnittstellen nennt (z. B. "gigabitEthernet
+    1/0/1"). Daraus zeigt das Dashboard "Port 1". Bereits bekannte Namen anderer Indizes bleiben."""
+    device = db.query(Device).filter(Device.id == payload.device_id).first()
+    if device is None:
+        raise HTTPException(status_code=404, detail=f"Gerät {payload.device_id} nicht gefunden")
+    names = {**device.snmp_interface_names, **payload.names}
+    if names != device.snmp_interface_names:
+        device.snmp_interface_names = names
+        db.commit()
+    return {"stored": len(payload.names)}

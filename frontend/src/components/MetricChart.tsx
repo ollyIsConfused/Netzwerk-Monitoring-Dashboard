@@ -51,17 +51,28 @@ export function MetricChart({
   samples,
   rule,
   loading,
+  interfaceLabels,
 }: {
   metricName: string;
   samples: MetricSamplePoint[];
   rule?: ThresholdRule;
   loading: boolean;
+  /** Portnamen des Geraets ("Port 1" statt "Interface 49153") */
+  interfaceLabels?: Record<string, string>;
 }) {
-  const { label, unit } = metricInfo(metricName);
+  const { label, unit } = metricInfo(metricName, interfaceLabels);
   const points: Point[] = samples.map((s) => ({ t: parseTimestamp(s.timestamp), value: s.value }));
   const spanMs = points.length > 1 ? points[points.length - 1].t - points[0].t : 0;
   const isReachable = metricName === "reachable";
+  // Port-Status (ifOperStatus): 1 = an, 2 = aus - "an" oben wie "online" bei der Erreichbarkeit
+  const isPortStatus = /_oper_status$/.test(metricName);
   const latest = points.length ? points[points.length - 1].value : null;
+
+  function formatTick(v: number): string {
+    if (isReachable) return v >= 1 ? "online" : "offline";
+    if (isPortStatus) return v === 1 ? "an" : v === 2 ? "aus" : String(v);
+    return unit === "bit/s" ? formatMetricValue(metricName, v) : String(v);
+  }
 
   return (
     <section className="card chart-card" style={{ opacity: loading ? 0.6 : 1 }}>
@@ -94,11 +105,12 @@ export function MetricChart({
                 tick={AXIS_TICK}
                 axisLine={false}
                 tickLine={false}
-                domain={isReachable ? [0, 1] : [0, "auto"]}
-                ticks={isReachable ? [0, 1] : undefined}
-                tickFormatter={(v: number) =>
-                  isReachable ? (v >= 1 ? "online" : "offline") : unit === "bit/s" ? formatMetricValue(metricName, v) : String(v)
+                domain={
+                  isReachable ? [0, 1] : isPortStatus ? [1, (dataMax: number) => Math.max(2, dataMax)] : [0, "auto"]
                 }
+                ticks={isReachable ? [0, 1] : isPortStatus ? [1, 2] : undefined}
+                reversed={isPortStatus}
+                tickFormatter={formatTick}
               />
               <Tooltip
                 content={<ChartTooltip metricName={metricName} />}
@@ -117,7 +129,9 @@ export function MetricChart({
                 />
               ))}
               <Area
-                type={isReachable ? "stepAfter" : "monotone"}
+                type={isReachable || isPortStatus ? "stepAfter" : "monotone"}
+                // Flaeche unter der Linie bis "aus" (bei umgedrehter Achse unten)
+                baseValue={isPortStatus ? "dataMax" : undefined}
                 dataKey="value"
                 stroke="var(--series-1)"
                 strokeWidth={2}

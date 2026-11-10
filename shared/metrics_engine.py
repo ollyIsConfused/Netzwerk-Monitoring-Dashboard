@@ -8,6 +8,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from .metric_labels import format_metric_value, metric_info
 from .models import AlertEvent, AlertLevel, Device, MetricSample, MetricStatus, ThresholdRule
 
 
@@ -44,6 +45,11 @@ def _last_alert_level(db: Session, device_id: int, metric_name: str) -> Optional
         .first()
     )
     return last.level if last else None
+
+
+def _alert_label(device: Device, metric_name: str) -> str:
+    """Fuer Alarmtext und E-Mail: "Port 1 Status" statt "if49153_oper_status"."""
+    return metric_info(metric_name, device.interface_labels)[0]
 
 
 def record_metric(
@@ -83,12 +89,13 @@ def record_metric(
         recent = _recent_statuses(db, device.id, metric_name, required)
         breach_matches = all(s == status for s in recent) and len(recent) >= required
         if breach_matches and last_level != target_level:
+            label = _alert_label(device, metric_name)
             event = AlertEvent(
                 device_id=device.id,
                 metric_name=metric_name,
                 level=target_level,
                 message=(
-                    f"{device.name}: {metric_name} = {value} "
+                    f"{device.name}: {label} = {format_metric_value(metric_name, value)} "
                     f"({'kritisch' if target_level == AlertLevel.critical else 'Warnung'})"
                 ),
                 value=value,
@@ -102,11 +109,12 @@ def record_metric(
             AlertEvent.resolved_at.is_(None),
             AlertEvent.level.in_([AlertLevel.warning, AlertLevel.critical]),
         ).update({AlertEvent.resolved_at: sample.timestamp}, synchronize_session=False)
+        label = _alert_label(device, metric_name)
         event = AlertEvent(
             device_id=device.id,
             metric_name=metric_name,
             level=AlertLevel.recovered,
-            message=f"{device.name}: {metric_name} wieder im Normalbereich ({value})",
+            message=f"{device.name}: {label} wieder im Normalbereich ({format_metric_value(metric_name, value)})",
             value=value,
         )
         db.add(event)

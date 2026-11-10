@@ -37,6 +37,23 @@ function metricOrder(name: string): number {
   return index === -1 ? DEFAULT_METRICS.length : index;
 }
 
+const INTERFACE_KINDS = ["in_bps", "out_bps", "oper_status"];
+
+/** Port-Diagramme zusammenhalten (eingehend, ausgehend, Status) und in Port-Reihenfolge zeigen. */
+function interfaceSortKey(name: string, labels?: Record<string, string>): [number, number] | null {
+  const metric = /^if(\d+)_(in_bps|out_bps|oper_status)$/.exec(name);
+  if (!metric) return null;
+  const port = /^Port (?:(\d+)\/)?(\d+)(?!\d)/.exec(labels?.[metric[1]] ?? "");
+  const position = port ? Number(port[1] ?? 1) * 10000 + Number(port[2]) : 1e9 + Number(metric[1]);
+  return [position, INTERFACE_KINDS.indexOf(metric[2])];
+}
+
+/** Grenze in der Tabelle; beim Port-Status liest sich "≥ aus (down)" schlecht. */
+function limitText(metricName: string, op: "≥" | "≤", value: number): string {
+  if (/_oper_status$/.test(metricName) && op === "≥" && value === 2) return "wenn nicht an";
+  return `${op} ${formatMetricValue(metricName, value)}`;
+}
+
 export function DeviceDetailPage() {
   const { deviceId } = useParams<{ deviceId: string }>();
   const { role } = useAuth();
@@ -110,8 +127,14 @@ export function DeviceDetailPage() {
 
   const chartMetrics = useMemo(() => {
     const names = new Set([...DEFAULT_METRICS, ...Object.keys(samplesByMetric)]);
-    return [...names].filter(isChartableMetric).sort((a, b) => metricOrder(a) - metricOrder(b) || a.localeCompare(b));
-  }, [samplesByMetric]);
+    const labels = device?.interface_labels;
+    return [...names].filter(isChartableMetric).sort((a, b) => {
+      const keyA = interfaceSortKey(a, labels);
+      const keyB = interfaceSortKey(b, labels);
+      if (keyA && keyB) return keyA[0] - keyB[0] || keyA[1] - keyB[1];
+      return metricOrder(a) - metricOrder(b) || a.localeCompare(b);
+    });
+  }, [samplesByMetric, device?.interface_labels]);
 
 
   if (error && !device) {
@@ -212,6 +235,7 @@ export function DeviceDetailPage() {
             samples={samplesByMetric[metricName] ?? []}
             rule={rules.find((r) => r.metric_name === metricName)}
             loading={loading}
+            interfaceLabels={device?.interface_labels}
           />
         ))}
       </div>
@@ -246,19 +270,19 @@ export function DeviceDetailPage() {
               <tbody>
                 {rules.map((rule) => (
                   <tr key={rule.id}>
-                    <td>{metricInfo(rule.metric_name).label}</td>
+                    <td>{metricInfo(rule.metric_name, device?.interface_labels).label}</td>
                     <td className="num">
                       {[
-                        rule.warning_max !== null && `≥ ${formatMetricValue(rule.metric_name, rule.warning_max)}`,
-                        rule.warning_min !== null && `≤ ${formatMetricValue(rule.metric_name, rule.warning_min)}`,
+                        rule.warning_max !== null && limitText(rule.metric_name, "≥", rule.warning_max),
+                        rule.warning_min !== null && limitText(rule.metric_name, "≤", rule.warning_min),
                       ]
                         .filter(Boolean)
                         .join(" · ") || "–"}
                     </td>
                     <td className="num">
                       {[
-                        rule.critical_max !== null && `≥ ${formatMetricValue(rule.metric_name, rule.critical_max)}`,
-                        rule.critical_min !== null && `≤ ${formatMetricValue(rule.metric_name, rule.critical_min)}`,
+                        rule.critical_max !== null && limitText(rule.metric_name, "≥", rule.critical_max),
+                        rule.critical_min !== null && limitText(rule.metric_name, "≤", rule.critical_min),
                       ]
                         .filter(Boolean)
                         .join(" · ") || "–"}
@@ -325,12 +349,13 @@ export function DeviceDetailPage() {
           metricOptions={chartMetrics.filter((m) => !rules.some((r) => r.metric_name === m))}
           onClose={() => setEditing(null)}
           onSaved={loadMeta}
+          interfaceLabels={device.interface_labels}
         />
       )}
       {deleting && device && (
         <ConfirmDialog
           title="Schwellenwert löschen"
-          message={`Schwellenwert für „${metricInfo(deleting.metric_name).label}“ löschen? Danach gibt es für diese Metrik keine Alarme mehr.`}
+          message={`Schwellenwert für „${metricInfo(deleting.metric_name, device.interface_labels).label}“ löschen? Danach gibt es für diese Metrik keine Alarme mehr.`}
           onConfirm={async () => {
             await api.delete(`/devices/${device.id}/thresholds/${deleting.id}`);
             await loadMeta();

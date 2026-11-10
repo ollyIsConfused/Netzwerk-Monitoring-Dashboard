@@ -19,7 +19,7 @@ from typing import Optional
 import requests
 
 from .ping_client import ping_host
-from .snmp_client import poll_interface_counters, snmp_auth
+from .snmp_client import SnmpAuth, discover_interface_names, poll_interface_counters, poll_interface_names, snmp_auth
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("collector")
@@ -37,6 +37,15 @@ SNMP_DEVICE_TYPES = ("switch", "router", "gateway")
 # dict is enough to compute bandwidth deltas between polls. A restart loses at
 # most one interval of history, which is fine for this purpose.
 _last_raw_counters: dict[tuple[int, str], tuple[float, datetime]] = {}
+
+# Schnittstellennamen aendern sich selten: je Geraet hoechstens einmal pro Stunde abfragen
+# (oder sofort, wenn sich die Port-Liste oder die Zugangsdaten aendern) und nur Neues melden.
+# Kam nichts zurueck (falsche Zugangsdaten, Geraet weg), schon nach 5 Minuten erneut versuchen.
+INTERFACE_NAMES_REFRESH_SECONDS = 3600
+INTERFACE_NAMES_RETRY_SECONDS = 300
+# Geraet -> ((Port-Liste, Zugangsdaten), naechste Abfrage fruehestens um)
+_names_checked: dict[int, tuple[tuple[tuple[int, ...], SnmpAuth], float]] = {}
+_names_reported: dict[int, dict[int, str]] = {}
 
 
 @dataclass
@@ -100,6 +109,47 @@ def _poll_ping(device: CollectorDevice, now: datetime) -> list[dict]:
     return samples
 
 
+def push_interface_names(device_id: int, names: dict[int, str]) -> None:
+    response = requests.post(
+        f"{BACKEND_URL}/collector/interface-names",
+        json={"device_id": device_id, "names": {str(index): name for index, name in names.items()}},
+        headers=_AUTH_HEADERS,
+        timeout=HTTP_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+
+
+def _report_interface_names(device: CollectorDevice, auth: SnmpAuth, if_indexes: list[int]) -> None:
+    """Alle Schnittstellen mit Namen (z. B. "gigabitEthernet 1/0/1") ans Backend, das daraus
+    "Port 1" macht und sie im Geraetedialog zum Anhaken anbietet. Fehler stoeren die Messung nicht."""
+    indexes = tuple(sorted(if_indexes))
+    # Andere Ports angehakt oder Zugangsdaten korrigiert: sofort neu lesen, nicht erst in einer Stunde
+    key = (indexes, auth)
+    checked = _names_checked.get(device.id)
+    now = time.monotonic()
+    if checked and checked[0] == key and now < checked[1]:
+        return
+    _names_checked[device.id] = (key, now + INTERFACE_NAMES_RETRY_SECONDS)
+
+    # Alle Ports des Geraets, damit man sie im Dashboard nur noch anhaken muss ("Port 1" bis
+    # "Port 10"); eingetragene Indizes, die dabei fehlen, einzeln nachfragen
+    names = discover_interface_names(device.ip_address, auth, device.snmp_port)
+    missing = [index for index in indexes if index not in names]
+    if missing:
+        names.update(poll_interface_names(device.ip_address, auth, missing, device.snmp_port))
+    if not names:
+        return
+    if names != _names_reported.get(device.id):
+        try:
+            push_interface_names(device.id, names)
+        except requests.RequestException as exc:
+            # Aeltere Backends kennen den Endpunkt nicht (404) - dann eben ohne Namen
+            logger.warning("Schnittstellennamen für %s nicht gemeldet: %s", device.name, exc)
+            return
+        _names_reported[device.id] = names
+    _names_checked[device.id] = (key, now + INTERFACE_NAMES_REFRESH_SECONDS)
+
+
 def _record_bandwidth(device: CollectorDevice, raw_metric: str, bps_metric: str, current_value: float, now: datetime) -> Optional[dict]:
     """Derives bits-per-second from two consecutive raw octet-counter samples."""
     cache_key = (device.id, raw_metric)
@@ -136,17 +186,19 @@ def _poll_snmp(device: CollectorDevice, now: datetime) -> list[dict]:
         return []
 
     samples: list[dict] = []
-    if_indexes = [i.strip() for i in (device.snmp_interfaces or "1").split(",") if i.strip()]
-
-    for if_index_str in if_indexes:
+    if_indexes = []
+    for if_index_str in (device.snmp_interfaces or "1").split(","):
         try:
-            if_index = int(if_index_str)
+            if_indexes.append(int(if_index_str.strip()))
         except ValueError:
             continue
 
+    answered = False
+    for if_index in if_indexes:
         counters = poll_interface_counters(device.ip_address, auth, if_index, device.snmp_port)
         if not counters:
             continue
+        answered = True
 
         for raw_name, raw_value in counters.items():
             samples.append(_sample(device.id, raw_name, raw_value, now))
@@ -162,6 +214,12 @@ def _poll_snmp(device: CollectorDevice, now: datetime) -> list[dict]:
             if bw_sample:
                 samples.append(bw_sample)
 
+    # Auch ohne eingetragene Ports nachsehen, welche das Geraet hat - sonst gaebe es nichts anzuhaken
+    if answered or not (device.snmp_interfaces or "").strip():
+        try:
+            _report_interface_names(device, auth, if_indexes)
+        except Exception:
+            logger.exception("Schnittstellennamen für %s konnten nicht gelesen werden", device.name)
     return samples
 
 

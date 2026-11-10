@@ -418,6 +418,15 @@ Anmeldung **SHA**, Auth-Passwort, Verschlüsselung **DES**, Privacy-Passwort, Po
 Interface-Indizes aus dem Test. Dieselben Fehler wie in der Tabelle stehen bei
 Problemen auch im Collector-Log (`journalctl -u monitoring-collector -n 50`).
 
+**Ports anhaken statt Nummern tippen:** Der Collector liest die Schnittstellenliste des
+Geräts (`ifName`, ersatzweise `ifDescr`) einmal pro Stunde bzw. sofort nach einer Änderung
+und meldet sie ans Backend. Im Gerätedialog stehen dann alle Ports als „Port 1“ bis „Port 10“
+(beim Router-Pi `eth0.20` & Co.) zum Anhaken, „Alle Ports“ wählt alle echten Ports auf einmal.
+Neues Gerät: erst mit SNMP-Zugangsdaten speichern, nach etwa einer Minute den Dialog erneut
+öffnen. Ein eigener Name ergänzt die Portnummer: „FritzBox“ an Port 1 erscheint als
+„Port 1 – FritzBox“. Die Indizes von Hand einzutragen geht weiterhin (aufklappbar unter der
+Liste). Dafür Webserver **und** Collector aktualisieren.
+
 Die Zugangsdaten liegen wie die Community im Klartext in der Datenbank (der Collector
 braucht sie im Klartext). Sichtbar sind sie nur für Admins im Bearbeiten-Dialog und für
 den Collector über dessen Token, nicht in den normalen Ansichten.
