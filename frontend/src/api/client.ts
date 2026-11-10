@@ -302,10 +302,10 @@ export interface AlertEvent {
   resolved_at: string | null;
 }
 
-/** Anzeigename und Einheit je Metrik; Interface-Metriken (if3_in_bps) werden erkannt. */
 /**
  * Bezeichnung und Einheit eines Messwerts. interfaceLabels (Device.interface_labels) macht aus
- * "Interface 49153 eingehend" z. B. "Port 1 eingehend".
+ * "Interface 49153 eingehend" z. B. "Port 1 eingehend". Gegenstueck fuer Alarmtexte und
+ * E-Mails: shared/metric_labels.py - Aenderungen dort nachziehen.
  */
 export function metricInfo(
   metricName: string,

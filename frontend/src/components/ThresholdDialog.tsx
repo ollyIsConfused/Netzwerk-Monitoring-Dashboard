@@ -162,8 +162,8 @@ export function ThresholdDialog({
               <span>Metrik</span>
               <select className="select" value={metric} onChange={(e) => setMetric(e.target.value)}>
                 {metricOptions.map((name) => (
-                  <option key={name} value={name}>
-                    {metricInfo(name, interfaceLabels).label} ({name})
+                  <option key={name} value={name} title={name}>
+                    {metricInfo(name, interfaceLabels).label}
                   </option>
                 ))}
               </select>
