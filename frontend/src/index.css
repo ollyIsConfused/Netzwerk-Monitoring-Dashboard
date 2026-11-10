@@ -3,17 +3,18 @@
    Symbol + Text auf, nie als Farbe allein. */
 :root {
   color-scheme: light;
-  --page: #f6f6f3;
-  --surface: #fcfcfb;
-  --surface-2: #f0efec;
-  --surface-hover: #ebeae6;
-  --border: rgba(11, 11, 11, 0.1);
-  --border-strong: rgba(11, 11, 11, 0.18);
-  --text: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #6f6d68;
-  --grid: #e1e0d9;
-  --axis: #c3c2b7;
+  /* Flaechen: Weiss mit einem Hauch Lila, man sieht es kaum */
+  --page: #f7f5fb;
+  --surface: #fdfcff;
+  --surface-2: #f2eff8;
+  --surface-hover: #ebe7f4;
+  --border: rgba(52, 28, 96, 0.1);
+  --border-strong: rgba(52, 28, 96, 0.18);
+  --text: #0c0b10;
+  --text-secondary: #524f5c;
+  --text-muted: #6d6979;
+  --grid: #e4e0ee;
+  --axis: #c5bfd4;
   --accent: #2a78d6;
   --accent-hover: #256abf;
   --accent-soft: rgba(42, 120, 214, 0.1);
@@ -30,8 +31,10 @@
   --success-soft: rgba(12, 163, 12, 0.1);
   --warning-soft: rgba(250, 178, 25, 0.16);
   --warning-icon: #a86f00;
-  --shadow: 0 1px 2px rgba(11, 11, 11, 0.06), 0 4px 16px rgba(11, 11, 11, 0.04);
-  --shadow-lg: 0 12px 40px rgba(11, 11, 11, 0.18);
+  /* Schatten lila getoent */
+  --shadow: 0 1px 2px rgba(76, 29, 149, 0.08), 0 6px 20px rgba(124, 58, 237, 0.09);
+  --shadow-lg: 0 16px 48px rgba(76, 29, 149, 0.24);
+  --backdrop: rgba(32, 16, 60, 0.45);
   --radius: 10px;
   --radius-sm: 6px;
   --sidebar-width: 232px;
@@ -40,17 +43,18 @@
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-    --page: #0d0d0d;
-    --surface: #1a1a19;
-    --surface-2: #232321;
-    --surface-hover: #2a2a28;
-    --border: rgba(255, 255, 255, 0.1);
-    --border-strong: rgba(255, 255, 255, 0.18);
-    --text: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #9b998f;
-    --grid: #2c2c2a;
-    --axis: #383835;
+    --page: #0d0c10;
+    --surface: #1a1820;
+    --surface-2: #232129;
+    --surface-hover: #2a2731;
+    --border: rgba(237, 230, 255, 0.1);
+    --border-strong: rgba(237, 230, 255, 0.18);
+    /* Schrift: Weiss mit einem Hauch Lila */
+    --text: #f8f6ff;
+    --text-secondary: #c6c1d3;
+    --text-muted: #9e98ad;
+    --grid: #2d2a35;
+    --axis: #3a3644;
     --accent: #3987e5;
     --accent-hover: #5598e7;
     --accent-soft: rgba(57, 135, 229, 0.16);
@@ -61,24 +65,26 @@
     --success-soft: rgba(12, 163, 12, 0.16);
     --warning-soft: rgba(250, 178, 25, 0.14);
     --warning-icon: #fab219;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 6px 22px rgba(124, 58, 237, 0.14);
+    --shadow-lg: 0 16px 48px rgba(8, 3, 20, 0.7), 0 8px 32px rgba(124, 58, 237, 0.18);
+    --backdrop: rgba(6, 3, 14, 0.6);
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page: #0d0d0d;
-  --surface: #1a1a19;
-  --surface-2: #232321;
-  --surface-hover: #2a2a28;
-  --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --text: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #9b998f;
-  --grid: #2c2c2a;
-  --axis: #383835;
+  --page: #0d0c10;
+  --surface: #1a1820;
+  --surface-2: #232129;
+  --surface-hover: #2a2731;
+  --border: rgba(237, 230, 255, 0.1);
+  --border-strong: rgba(237, 230, 255, 0.18);
+  /* Schrift: Weiss mit einem Hauch Lila */
+  --text: #f8f6ff;
+  --text-secondary: #c6c1d3;
+  --text-muted: #9e98ad;
+  --grid: #2d2a35;
+  --axis: #3a3644;
   --accent: #3987e5;
   --accent-hover: #5598e7;
   --accent-soft: rgba(57, 135, 229, 0.16);
@@ -89,8 +95,9 @@
   --success-soft: rgba(12, 163, 12, 0.16);
   --warning-soft: rgba(250, 178, 25, 0.14);
   --warning-icon: #fab219;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 6px 22px rgba(124, 58, 237, 0.14);
+  --shadow-lg: 0 16px 48px rgba(8, 3, 20, 0.7), 0 8px 32px rgba(124, 58, 237, 0.18);
+  --backdrop: rgba(6, 3, 14, 0.6);
 }
 
 * {
@@ -219,7 +226,7 @@ h3 {
   padding: 0 6px;
   border-radius: 999px;
   background: var(--status-critical);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 600;
   text-align: center;
@@ -555,7 +562,7 @@ td.actions {
 .btn-danger-solid {
   background: var(--status-critical);
   border-color: var(--status-critical);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .btn-danger-solid:hover {
@@ -879,7 +886,7 @@ code {
   display: grid;
   place-items: center;
   padding: 16px;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--backdrop);
 }
 
 .modal {
