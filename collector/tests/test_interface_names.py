@@ -112,6 +112,45 @@ def test_ports_are_discovered_even_before_any_are_chosen(monkeypatch):
     assert len(walks) == 1 and pushes == [(5, TP_LINK)]
 
 
+def test_corrected_credentials_are_used_right_away(monkeypatch):
+    # Falsches Passwort: nichts gefunden. Nach der Korrektur im Dialog nicht eine Stunde warten
+    walks, _singles, pushes = _setup(monkeypatch, {})
+    monkeypatch.setattr(main, "poll_interface_counters", lambda *args: {})
+    main._poll_snmp(_device(snmp_interfaces=None, snmp_v3_auth_password="falsch12345678"), datetime(2026, 11, 4, 12, 0))
+    monkeypatch.setattr(main, "discover_interface_names", lambda ip, auth, port: walks.append(ip) or dict(TP_LINK))
+    main._poll_snmp(_device(snmp_interfaces=None), datetime(2026, 11, 4, 12, 1))
+    assert len(walks) == 2 and pushes == [(5, TP_LINK)]
+
+
+def test_nothing_found_is_retried_after_minutes_not_an_hour(monkeypatch):
+    walks, _singles, _pushes = _setup(monkeypatch, {})
+    monkeypatch.setattr(main, "poll_interface_counters", lambda *args: {})
+    clock = [1000.0]
+    monkeypatch.setattr(main.time, "monotonic", lambda: clock[0])
+
+    main._poll_snmp(_device(snmp_interfaces=None), datetime(2026, 11, 4, 12, 0))
+    clock[0] += 60
+    main._poll_snmp(_device(snmp_interfaces=None), datetime(2026, 11, 4, 12, 1))
+    assert len(walks) == 1  # nicht bei jedem Durchlauf
+    clock[0] += main.INTERFACE_NAMES_RETRY_SECONDS
+    main._poll_snmp(_device(snmp_interfaces=None), datetime(2026, 11, 4, 12, 6))
+    assert len(walks) == 2
+
+
+def test_found_names_are_kept_for_an_hour(monkeypatch):
+    walks, _singles, _pushes = _setup(monkeypatch, TP_LINK)
+    clock = [1000.0]
+    monkeypatch.setattr(main.time, "monotonic", lambda: clock[0])
+
+    main._poll_snmp(_device(), datetime(2026, 11, 4, 12, 0))
+    clock[0] += main.INTERFACE_NAMES_RETRY_SECONDS + 1
+    main._poll_snmp(_device(), datetime(2026, 11, 4, 12, 6))
+    assert len(walks) == 1
+    clock[0] = 1000.0 + main.INTERFACE_NAMES_REFRESH_SECONDS
+    main._poll_snmp(_device(), datetime(2026, 11, 4, 13, 0))
+    assert len(walks) == 2
+
+
 def test_unreachable_device_with_chosen_ports_is_not_walked(monkeypatch):
     walks, _singles, _pushes = _setup(monkeypatch, {})
     monkeypatch.setattr(main, "poll_interface_counters", lambda *args: {})

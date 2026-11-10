@@ -39,9 +39,12 @@ SNMP_DEVICE_TYPES = ("switch", "router", "gateway")
 _last_raw_counters: dict[tuple[int, str], tuple[float, datetime]] = {}
 
 # Schnittstellennamen aendern sich selten: je Geraet hoechstens einmal pro Stunde abfragen
-# (oder sofort, wenn sich die Liste der Interface-Indizes aendert) und nur Neues melden.
+# (oder sofort, wenn sich die Port-Liste oder die Zugangsdaten aendern) und nur Neues melden.
+# Kam nichts zurueck (falsche Zugangsdaten, Geraet weg), schon nach 5 Minuten erneut versuchen.
 INTERFACE_NAMES_REFRESH_SECONDS = 3600
-_names_checked: dict[int, tuple[tuple[int, ...], float]] = {}
+INTERFACE_NAMES_RETRY_SECONDS = 300
+# Geraet -> ((Port-Liste, Zugangsdaten), naechste Abfrage fruehestens um)
+_names_checked: dict[int, tuple[tuple[tuple[int, ...], SnmpAuth], float]] = {}
 _names_reported: dict[int, dict[int, str]] = {}
 
 
@@ -119,28 +122,32 @@ def push_interface_names(device_id: int, names: dict[int, str]) -> None:
 def _report_interface_names(device: CollectorDevice, auth: SnmpAuth, if_indexes: list[int]) -> None:
     """Alle Schnittstellen mit Namen (z. B. "gigabitEthernet 1/0/1") ans Backend, das daraus
     "Port 1" macht und sie im Geraetedialog zum Anhaken anbietet. Fehler stoeren die Messung nicht."""
-    key = tuple(sorted(if_indexes))
+    indexes = tuple(sorted(if_indexes))
+    # Andere Ports angehakt oder Zugangsdaten korrigiert: sofort neu lesen, nicht erst in einer Stunde
+    key = (indexes, auth)
     checked = _names_checked.get(device.id)
     now = time.monotonic()
-    if checked and checked[0] == key and now - checked[1] < INTERFACE_NAMES_REFRESH_SECONDS:
+    if checked and checked[0] == key and now < checked[1]:
         return
-    _names_checked[device.id] = (key, now)
+    _names_checked[device.id] = (key, now + INTERFACE_NAMES_RETRY_SECONDS)
 
     # Alle Ports des Geraets, damit man sie im Dashboard nur noch anhaken muss ("Port 1" bis
     # "Port 10"); eingetragene Indizes, die dabei fehlen, einzeln nachfragen
     names = discover_interface_names(device.ip_address, auth, device.snmp_port)
-    missing = [index for index in key if index not in names]
+    missing = [index for index in indexes if index not in names]
     if missing:
         names.update(poll_interface_names(device.ip_address, auth, missing, device.snmp_port))
-    if not names or names == _names_reported.get(device.id):
+    if not names:
         return
-    try:
-        push_interface_names(device.id, names)
-    except requests.RequestException as exc:
-        # Aeltere Backends kennen den Endpunkt nicht (404) - dann eben ohne Namen
-        logger.warning("Schnittstellennamen für %s nicht gemeldet: %s", device.name, exc)
-        return
-    _names_reported[device.id] = names
+    if names != _names_reported.get(device.id):
+        try:
+            push_interface_names(device.id, names)
+        except requests.RequestException as exc:
+            # Aeltere Backends kennen den Endpunkt nicht (404) - dann eben ohne Namen
+            logger.warning("Schnittstellennamen für %s nicht gemeldet: %s", device.name, exc)
+            return
+        _names_reported[device.id] = names
+    _names_checked[device.id] = (key, now + INTERFACE_NAMES_REFRESH_SECONDS)
 
 
 def _record_bandwidth(device: CollectorDevice, raw_metric: str, bps_metric: str, current_value: float, now: datetime) -> Optional[dict]:

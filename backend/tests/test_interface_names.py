@@ -77,3 +77,39 @@ def test_interface_names_endpoint_requires_collector_token(client, admin_headers
     assert client.post("/collector/interface-names", json=payload, headers=admin_headers).status_code == 401
     assert client.post("/collector/interface-names", json={"device_id": 999, "names": {}},
                        headers=COLLECTOR).status_code == 404
+
+
+def test_alert_text_names_the_port(client, admin_headers):
+    """Alarmtext und E-Mail: "Port 1 – FritzBox Status = aus" statt "if49153_oper_status = 2.0"."""
+    device = _switch(client, admin_headers, snmp_interface_labels={"49153": "FritzBox"})
+    client.post("/collector/interface-names", json={"device_id": device["id"], "names": {"49153": "gigabitEthernet 1/0/1"}},
+                headers=COLLECTOR)
+    response = client.post(f"/devices/{device['id']}/thresholds",
+                           json={"metric_name": "if49153_oper_status", "critical_max": 2, "consecutive_breaches_required": 1},
+                           headers=admin_headers)
+    assert response.status_code in (200, 201), response.text
+
+    for value in (2, 1):
+        response = client.post("/collector/metrics", headers=COLLECTOR, json={
+            "samples": [{"device_id": device["id"], "metric_name": "if49153_oper_status", "value": value}]})
+        assert response.status_code == 202, response.text
+
+    alerts = client.get("/alerts", params={"active_only": False}, headers=admin_headers).json()
+    assert sorted(alert["message"] for alert in alerts) == [
+        "Switch: Port 1 – FritzBox Status = aus (kritisch)",
+        "Switch: Port 1 – FritzBox Status wieder im Normalbereich (an)",
+    ]
+
+
+def test_metric_values_are_readable():
+    from shared.metric_labels import format_metric_value, metric_info
+
+    assert metric_info("if7_in_bps") == ("Interface 7 eingehend", "bit/s")
+    assert metric_info("if7_in_bps", {"7": "Port 7"}) == ("Port 7 eingehend", "bit/s")
+    assert metric_info("disk_mnt_storage_pct") == ("Festplatte /mnt/storage", "%")
+    assert format_metric_value("if7_in_bps", 950_300_000) == "950 Mbit/s"
+    assert format_metric_value("if7_out_bps", 12_340) == "12,3 kbit/s"
+    assert format_metric_value("latency_ms", 482.0) == "482 ms"
+    assert format_metric_value("packet_loss_pct", 12.5) == "12,5 %"
+    assert format_metric_value("reachable", 0) == "nicht erreichbar"
+    assert format_metric_value("unbekannt", 3) == "3,0"

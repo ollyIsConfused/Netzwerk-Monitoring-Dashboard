@@ -8,6 +8,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from .metric_labels import format_metric_value, metric_info
 from .models import AlertEvent, AlertLevel, Device, MetricSample, MetricStatus, ThresholdRule
 
 
@@ -78,6 +79,8 @@ def record_metric(
         target_level = AlertLevel.warning
 
     last_level = _last_alert_level(db, device.id, metric_name)
+    # Fuer Alarmtext und E-Mail: "Port 1 Status" statt "if49153_oper_status"
+    label = metric_info(metric_name, device.interface_labels)[0]
 
     if target_level is not None:
         recent = _recent_statuses(db, device.id, metric_name, required)
@@ -88,7 +91,7 @@ def record_metric(
                 metric_name=metric_name,
                 level=target_level,
                 message=(
-                    f"{device.name}: {metric_name} = {value} "
+                    f"{device.name}: {label} = {format_metric_value(metric_name, value)} "
                     f"({'kritisch' if target_level == AlertLevel.critical else 'Warnung'})"
                 ),
                 value=value,
@@ -106,7 +109,7 @@ def record_metric(
             device_id=device.id,
             metric_name=metric_name,
             level=AlertLevel.recovered,
-            message=f"{device.name}: {metric_name} wieder im Normalbereich ({value})",
+            message=f"{device.name}: {label} wieder im Normalbereich ({format_metric_value(metric_name, value)})",
             value=value,
         )
         db.add(event)
