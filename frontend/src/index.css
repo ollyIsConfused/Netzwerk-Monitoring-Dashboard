@@ -443,6 +443,13 @@ th {
   white-space: nowrap;
 }
 
+/* Etwas schmalere Zellen, damit "Unbekannt" und die Uhrzeit mit Sekunden ganz hineinpassen */
+.device-table th,
+.device-table td {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
 tbody tr:last-child td {
   border-bottom: none;
 }
