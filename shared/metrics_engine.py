@@ -47,6 +47,11 @@ def _last_alert_level(db: Session, device_id: int, metric_name: str) -> Optional
     return last.level if last else None
 
 
+def _alert_label(device: Device, metric_name: str) -> str:
+    """Fuer Alarmtext und E-Mail: "Port 1 Status" statt "if49153_oper_status"."""
+    return metric_info(metric_name, device.interface_labels)[0]
+
+
 def record_metric(
     db: Session,
     device: Device,
@@ -79,13 +84,12 @@ def record_metric(
         target_level = AlertLevel.warning
 
     last_level = _last_alert_level(db, device.id, metric_name)
-    # Fuer Alarmtext und E-Mail: "Port 1 Status" statt "if49153_oper_status"
-    label = metric_info(metric_name, device.interface_labels)[0]
 
     if target_level is not None:
         recent = _recent_statuses(db, device.id, metric_name, required)
         breach_matches = all(s == status for s in recent) and len(recent) >= required
         if breach_matches and last_level != target_level:
+            label = _alert_label(device, metric_name)
             event = AlertEvent(
                 device_id=device.id,
                 metric_name=metric_name,
@@ -105,6 +109,7 @@ def record_metric(
             AlertEvent.resolved_at.is_(None),
             AlertEvent.level.in_([AlertLevel.warning, AlertLevel.critical]),
         ).update({AlertEvent.resolved_at: sample.timestamp}, synchronize_session=False)
+        label = _alert_label(device, metric_name)
         event = AlertEvent(
             device_id=device.id,
             metric_name=metric_name,
