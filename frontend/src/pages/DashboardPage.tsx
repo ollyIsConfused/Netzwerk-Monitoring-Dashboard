@@ -102,13 +102,13 @@ function DeviceTable({
     <div className="table-wrap">
       <table className="device-table">
         <colgroup>
-          <col style={{ width: "18%" }} />
-          <col style={{ width: "15%" }} />
-          <col style={{ width: "12%" }} />
-          <col style={{ width: "13%" }} />
-          <col style={{ width: "13%" }} />
-          <col style={{ width: "12%" }} />
           <col style={{ width: "17%" }} />
+          <col style={{ width: "14%" }} />
+          <col style={{ width: "12%" }} />
+          <col style={{ width: "12%" }} />
+          <col style={{ width: "14%" }} />
+          <col style={{ width: "12%" }} />
+          <col style={{ width: "19%" }} />
         </colgroup>
         <thead>
           <tr>
